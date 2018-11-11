@@ -2,9 +2,7 @@
 
 Reference documentation: [https://kubernetes.io/docs/setup/independent/install-kubeadm/](https://kubernetes.io/docs/setup/independent/install-kubeadm/)
 
-Kubeadm helps you setup/bootstrap a minimum viable/usable Kubernetes cluster that still conforms to best practices. Kubeadm also supports cluster upgrades, downgrade, and managing bootstrap tokens.
-
-
+Kubeadm helps you setup/bootstrap a minimum viable/usable Kubernetes cluster that just works and conforms to best practices. Kubeadm also supports cluster expasion, upgrades, downgrade, and managing bootstrap tokens, which is extra featires, if you are comparing it with minikube.
 
 In this guide, I will setup a single node kubernetes cluster using **kubeadm** and Docker-CE. Once installed, I will add more nodes to the cluster - again using **kubeadm**.
 
@@ -13,28 +11,21 @@ In this guide, I will setup a single node kubernetes cluster using **kubeadm** a
 * RAM: Minimum 1 GB RAM for each node (master+worker); you will only be able to run very few (and very small) containers, like nginx, mysql, etc.
 * CPU: Minumum 2 CPU for master node; worker nodes can live with single core CPUs
 * Disk: 2GB for host OS + 10 GB for storing container images
-* Network - Infrastructure: A functional virtual/physical network with some usable IP addresses (can be public or private) . This can be on any cloud provider as well. In this guide, it will be 10.240.0.0/24
-* Network - Pod network: A network IP range completely separate from other two networks, with subnet mask of /16 or smaller (e.g. /12). This network will be subdivided into subnets later. In this guide it will be 10.200.0.0/16 . Please note that kubeadm does not support kubenet, so we need to use one of the CNI add-ons - such as flannel. By default Flannel sets up a pod network with 10.244.0.0/16, which means that we need to pass this pod network to `kubeadm init` (further below); or, modify the flannel configuration with the pod network of our own choice - before actually applying it blindly. :)
-* Network - Service network:  A network IP range completely separate from other two networks, used by the services. This will be considered a completely virtual network. In this guide, it will be 10.32.0.0/16. (default "10.96.0.0/12")
+* Network - Infrastructure: A functional virtual/physical network with some usable IP addresses (can be public or private) . This can be on any cloud provider as well. You are free to use any network / ip scheme for yourself. In this guide, it will be `10.240.0.0/24`
+* Network - Pod network: A network IP range completely separate from other two networks, with subnet mask of `/16` or smaller (e.g. `/12`). This network will be subdivided into subnets later. In this guide it will be `10.200.0.0/16` . Please note that kubeadm does not support kubenet, so we need to use one of the CNI add-ons - such as flannel. By default Flannel sets up a pod network `10.244.0.0/16`, which means that we need to pass this pod network to `kubeadm init` (further below); or, modify the flannel configuration with the pod network of our own choice - before actually applying it blindly. :)
+* Network - Service network:  A network IP range completely separate from other two networks, used by the services. This will be considered a completely virtual network. The default service network configured by kubeadm is `10.96.0.0/12`. In this guide, it will be `10.32.0.0/16`.
 * Disable Firewall (including removing the firewalld package), or open the following ports on each type of node, after the OS installation is complete. 
 ** Firewall/ports - Master: Incoming open (22, 6443, 10250, 10251, 10252, 2379, 2380)
 ** Firewall/ports - Worker: Incoming open (22, 10250, 30000-32767)
 * OS: Any recent version of Fedora/CentOS/RHEL or Debian based OS. This guide uses Fedora 28
-* No swap - must disable swap partition during OS installation in order for the kubelet to work properly. See: [https://github.com/kubernetes/kubernetes/issues/53533](https://github.com/kubernetes/kubernetes/issues/53533)
-* Disable SELinux
+* No swap - must disable swap partition during OS installation in order for the kubelet to work properly. See: [https://github.com/kubernetes/kubernetes/issues/53533](https://github.com/kubernetes/kubernetes/issues/53533) for details on why disable swap. Swap may seem a good idea, it is not - on Kubernetes!
+* Disable SELinux / App Armour.
 
 ## OS setup:
 
 ```
 [root@kworkhorse lib]# cat /etc/hosts
 127.0.0.1   localhost localhost.localdomain
-
-
- # MediaCenter/TV at home
-192.168.0.21	ki3.home.wbitt.com mediacenter.home.wbitt.com
-
- # Production VM for wbitt
-192.168.0.10	pserver5.home.wbitt.com
 
  # Virtual Kubernetes cluster
 10.240.0.31	kubeadm-node1
@@ -214,7 +205,11 @@ I can downgrade docker to 18.06 , which is certified with kubeadm, but I can try
 
 
 ```
-[root@kubeadm-node1 ~]# kubeadm init   --pod-network-cidr "10.200.0.0/16"   --service-cidr "10.32.0.0/16" --ignore-preflight-errors="SystemVerification"
+[root@kubeadm-node1 ~]# kubeadm init  \
+  --pod-network-cidr "10.200.0.0/16" \
+  --service-cidr "10.32.0.0/16" \
+  --ignore-preflight-errors="SystemVerification"
+
 [init] using Kubernetes version: v1.12.2
 [preflight] running pre-flight checks
 [preflight] The system verification failed. Printing the output from the verification:
@@ -321,7 +316,7 @@ Now we setup the user `student` to use kubectl. This is part of the instructions
 
 [student@kubeadm-node1 ~]$ mkdir -p $HOME/.kube
 
-[student@kubeadm-node1 ~]$   sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+[student@kubeadm-node1 ~]$ sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
 
 We trust you have received the usual lecture from the local System
 Administrator. It usually boils down to these three things:
@@ -333,7 +328,6 @@ Administrator. It usually boils down to these three things:
 [sudo] password for student: 
 
 [student@kubeadm-node1 ~]$ sudo chown $(id -u):$(id -g) $HOME/.kube/config
-[student@kubeadm-node1 ~]$ 
 ```
 
 Check if you can talk to the cluster/API server:
@@ -359,10 +353,11 @@ At least the cluster's components are ok!
 At this time, if you check cluster health, you will see **Master** as **NotReady**. It is because a pod network is not yet deployed on the cluster. You must install a pod network add-on so that your pods can communicate with each other. Use one of the network addons listed in the Networking section at [https://kubernetes.io/docs/concepts/cluster-administration/addons/](https://kubernetes.io/docs/concepts/cluster-administration/addons/). Flannel is the easiest. Others can be used too.
 
 **Important:** The network must be deployed before any applications. Also, CoreDNS will not start up before a network is installed. kubeadm only supports Container Network Interface (CNI) based networks (and does not support kubenet).
+
 **Repeat: Kubeadm DOES NOT support kubenet** 
 
 
-##Install flannel CNI plugin/addon:
+## Install flannel CNI plugin/addon:
 **Note:** For flannel to work correctly, you must pass `--pod-network-cidr=10.244.0.0/16` to `kubeadm init` ; or modify the kube-flannel.yaml to use your own pod network before applying tha yaml with `kubectl`. 
 
 Also, set `/proc/sys/net/bridge/bridge-nf-call-iptables` to `1` by running `sysctl net.bridge.bridge-nf-call-iptables=1` to pass bridged IPv4 traffic to iptables’ chains. This is a requirement for some CNI plugins to work. Setup this configuration in the `/etc/sysctl.conf` file to make this permanent.

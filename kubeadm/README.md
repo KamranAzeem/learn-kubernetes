@@ -4,6 +4,7 @@ Reference documentation: [https://kubernetes.io/docs/setup/independent/install-k
 
 Kubeadm helps you setup/bootstrap a minimum viable/usable Kubernetes cluster that just works. Kubeadm also supports cluster expasion, upgrades, downgrade, and managing bootstrap tokens, which are extra features, if you are comparing it with minikube.
 
+# Setup / components / look and feel:
 
 ![kubeadm-cluster.png](kubeadm-cluster.png)
 
@@ -23,18 +24,18 @@ In this guide, I will setup a single node kubernetes cluster using **kubeadm** a
 
 
 ## Preparation:
-* RAM: Minimum 1 GB RAM for each node (master+worker); you will only be able to run very few (and very small) containers, like nginx, mysql, etc.
-* CPU: Minumum 2 CPU for master node; worker nodes can live with single core CPUs
-* Disk: 2GB for host OS + 10 GB for storing container images
-* Network - Infrastructure: A functional virtual/physical network with some usable IP addresses (can be public or private) . This can be on any cloud provider as well. You are free to use any network / ip scheme for yourself. In this guide, it will be `10.240.0.0/24`
-* Network - Pod network: A network IP range completely separate from other two networks, with subnet mask of `/16` or smaller (e.g. `/12`). This network will be subdivided into subnets later. In this guide it will be `10.200.0.0/16` . Please note that kubeadm does not support kubenet, so we need to use one of the CNI add-ons - such as flannel. By default Flannel sets up a pod network `10.244.0.0/16`, which means that we need to pass this pod network to `kubeadm init` (further below); or, modify the flannel configuration with the pod network of our own choice - before actually applying it blindly. :)
-* Network - Service network:  A network IP range completely separate from other two networks, used by the services. This will be considered a completely virtual network. The default service network configured by kubeadm is `10.96.0.0/12`. In this guide, it will be `10.32.0.0/16`.
-* Disable Firewall (including removing the firewalld package), or open the following ports on each type of node, after the OS installation is complete. 
-** Firewall/ports - Master: Incoming open (22, 6443, 10250, 10251, 10252, 2379, 2380)
-** Firewall/ports - Worker: Incoming open (22, 10250, 30000-32767)
-* OS: Any recent version of Fedora/CentOS/RHEL or Debian based OS. This guide uses Fedora 28
-* No swap - must disable swap partition during OS installation in order for the kubelet to work properly. See: [https://github.com/kubernetes/kubernetes/issues/53533](https://github.com/kubernetes/kubernetes/issues/53533) for details on why disable swap. Swap may seem a good idea, it is not - on Kubernetes!
-* Disable SELinux / App Armour.
+* **RAM:** Minimum 1 GB RAM for each node (master+worker); you will only be able to run very few (and very small) containers, like nginx, mysql, etc.
+* **CPU:** Minumum 2 CPU for master node; worker nodes can live with single core CPUs
+* **Disk:** 4 GB for host OS + 20 GB for storing container images. (no swap)
+* **Network - Infrastructure:** A functional virtual/physical network with some usable IP addresses (can be public or private) . This can be on any cloud provider as well. You are free to use any network / ip scheme for yourself. In this guide, it will be `10.240.0.0/24`
+* **Network - Pod network:** A network IP range completely separate from other two networks, with subnet mask of `/16` or smaller (e.g. `/12`). This network will be subdivided into subnets later. In this guide it will be `10.200.0.0/16` . Please note that kubeadm does not support kubenet, so we need to use one of the CNI add-ons - such as flannel. By default Flannel sets up a pod network `10.244.0.0/16`, which means that we need to pass this pod network to `kubeadm init` (further below); or, modify the flannel configuration with the pod network of our own choice - before actually applying it blindly. :)
+* **Network - Service network:** A network IP range completely separate from other two networks, used by the services. This will be considered a completely virtual network. The default service network configured by kubeadm is `10.96.0.0/12`. In this guide, it will be `10.32.0.0/16`.
+* **Firewall:** Disable Firewall (including removing the firewalld package), or open the following ports on each type of node, after the OS installation is complete. 
+** **Firewall/ports - Master:** Incoming open (22, 6443, 10250, 10251, 10252, 2379, 2380)
+** **Firewall/ports - Worker:** Incoming open (22, 10250, 30000-32767)
+* **OS:** Any recent version of Fedora/CentOS/RHEL or Debian based OS. This guide uses Fedora 28
+* **Disk Partitioning:** No swap - must disable swap partition during OS installation in order for the kubelet to work properly. See: [https://github.com/kubernetes/kubernetes/issues/53533](https://github.com/kubernetes/kubernetes/issues/53533) for details on why disable swap. Swap may seem a good idea, it is not - on Kubernetes!
+* **SELinux:** Disable SELinux / App Armour.
 
 ## OS setup:
 

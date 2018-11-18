@@ -31,8 +31,8 @@ In this guide, I will setup a single node kubernetes cluster using **kubeadm** a
 * **Network - Pod network:** A network IP range completely separate from other two networks, with subnet mask of `/16` or smaller (e.g. `/12`). This network will be subdivided into subnets later. In this guide it will be `10.200.0.0/16` . Please note that kubeadm does not support kubenet, so we need to use one of the CNI add-ons - such as flannel. By default Flannel sets up a pod network `10.244.0.0/16`, which means that we need to pass this pod network to `kubeadm init` (further below); or, modify the flannel configuration with the pod network of our own choice - before actually applying it blindly. :)
 * **Network - Service network:** A network IP range completely separate from other two networks, used by the services. This will be considered a completely virtual network. The default service network configured by kubeadm is `10.96.0.0/12`. In this guide, it will be `10.32.0.0/16`.
 * **Firewall:** Disable Firewall (including removing the firewalld package), or open the following ports on each type of node, after the OS installation is complete. 
-** **Firewall/ports - Master:** Incoming open (22, 6443, 10250, 10251, 10252, 2379, 2380)
-** **Firewall/ports - Worker:** Incoming open (22, 10250, 30000-32767)
+* **Firewall/ports - Master:** Incoming open (22, 6443, 10250, 10251, 10252, 2379, 2380)
+* **Firewall/ports - Worker:** Incoming open (22, 10250, 30000-32767)
 * **OS:** Any recent version of Fedora/CentOS/RHEL or Debian based OS. This guide uses Fedora 28
 * **Disk Partitioning:** No swap - must disable swap partition during OS installation in order for the kubelet to work properly. See: [https://github.com/kubernetes/kubernetes/issues/53533](https://github.com/kubernetes/kubernetes/issues/53533) for details on why disable swap. Swap may seem a good idea, it is not - on Kubernetes!
 * **SELinux:** Disable SELinux / App Armour.

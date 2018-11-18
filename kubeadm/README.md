@@ -2,7 +2,22 @@
 
 Reference documentation: [https://kubernetes.io/docs/setup/independent/install-kubeadm/](https://kubernetes.io/docs/setup/independent/install-kubeadm/)
 
-Kubeadm helps you setup/bootstrap a minimum viable/usable Kubernetes cluster that just works and conforms to best practices. Kubeadm also supports cluster expasion, upgrades, downgrade, and managing bootstrap tokens, which is extra featires, if you are comparing it with minikube.
+Kubeadm helps you setup/bootstrap a minimum viable/usable Kubernetes cluster that just works. Kubeadm also supports cluster expasion, upgrades, downgrade, and managing bootstrap tokens, which are extra features, if you are comparing it with minikube.
+
+
+![kubeadm-cluster.png](kubeadm-cluster.png)
+
+## Features and Limitations:
+* Possible to create multi-node kubernetes cluster compared to minikube.
+* It creates a single node master. No High Availability for master node available yet.
+* You can create/join one or more **dedicated** worker-nodes.
+* Being multi-node in nature, allows you to use multi-node features such as [advance scheduling policies](https://kubernetes.io/blog/2017/03/advanced-scheduling-in-kubernetes/).
+* Services of type **LoadBalancer** still not possible
+* Choice of using diffrent container engines, such as Docker, Rocket, etc. This is not possible in MiniKube.
+* Choice of wide veriety of (CNI-based) network plugins to be used for pod networking. This is not possible in MiniKube.
+* Supports cluster expansion, upgrades, downgrade, etc.
+* *Can* be used as a production cluster, though extreme caution is advised. You should know what you are doing!
+
 
 In this guide, I will setup a single node kubernetes cluster using **kubeadm** and Docker-CE. Once installed, I will add more nodes to the cluster - again using **kubeadm**.
 

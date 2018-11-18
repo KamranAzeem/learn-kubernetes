@@ -4,7 +4,7 @@ Reference documentation: [https://kubernetes.io/docs/setup/independent/install-k
 
 Kubeadm helps you setup/bootstrap a minimum viable/usable Kubernetes cluster that just works. Kubeadm also supports cluster expasion, upgrades, downgrade, and managing bootstrap tokens, which are extra features, if you are comparing it with minikube.
 
-# Setup / components / look and feel:
+## Setup / components / look and feel:
 
 ![kubeadm-cluster.png](kubeadm-cluster.png)
 

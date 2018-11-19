@@ -6,7 +6,11 @@ Kubeadm helps you setup/bootstrap a minimum viable/usable Kubernetes cluster tha
 
 ## Setup / components / look and feel:
 
+### KubeAdm cluster components:
 ![kubeadm-cluster.png](kubeadm-cluster.png)
+
+### KubeAdm cluster networks:
+![kubeadm-cluster-network-1.png](kubeadm-cluster-network-1.png)
 
 ## Features and Limitations:
 * Possible to create multi-node kubernetes cluster compared to minikube.

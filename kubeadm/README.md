@@ -2,7 +2,10 @@
 
 Reference documentation: [https://kubernetes.io/docs/setup/independent/install-kubeadm/](https://kubernetes.io/docs/setup/independent/install-kubeadm/)
 
-Kubeadm helps you setup/bootstrap a minimum viable/usable Kubernetes cluster that just works. Kubeadm also supports cluster expasion, upgrades, downgrade, and managing bootstrap tokens, which are extra features, if you are comparing it with minikube.
+Kubeadm helps you setup/bootstrap a minimum viable/usable Kubernetes cluster that just works. Kubeadm also supports cluster expansion, upgrades, downgrade, and managing bootstrap tokens, which are extra features, if you are comparing it with minikube.
+
+A video showing kubeadm cluster setup, (in Urdu language), using this guide, is available at: [https://youtu.be/FRvkSlIUimM](https://youtu.be/FRvkSlIUimM)
+
 
 ## Setup / components / look and feel:
 
@@ -18,8 +21,8 @@ Kubeadm helps you setup/bootstrap a minimum viable/usable Kubernetes cluster tha
 * You can create/join one or more **dedicated** worker-nodes.
 * Being multi-node in nature, allows you to use multi-node features such as [advance scheduling policies](https://kubernetes.io/blog/2017/03/advanced-scheduling-in-kubernetes/).
 * Services of type **LoadBalancer** still not possible
-* Choice of using diffrent container engines, such as Docker, Rocket, etc. This is not possible in MiniKube.
-* Choice of wide veriety of (CNI-based) network plugins to be used for pod networking. This is not possible in MiniKube.
+* Choice of using different container engines, such as Docker, Rocket, etc. This is not possible in MiniKube.
+* Choice of wide variety of (CNI-based) network plugins to be used for pod networking. This is not possible in MiniKube.
 * Supports cluster expansion, upgrades, downgrade, etc.
 * *Can* be used as a production cluster, though extreme caution is advised. You should know what you are doing!
 
@@ -29,7 +32,7 @@ In this guide, I will setup a single node kubernetes cluster using **kubeadm** a
 
 ## Preparation:
 * **RAM:** Minimum 1 GB RAM for each node (master+worker); you will only be able to run very few (and very small) containers, like nginx, mysql, etc.
-* **CPU:** Minumum 2 CPU for master node; worker nodes can live with single core CPUs
+* **CPU:** Minimum 2 CPU for master node; worker nodes can live with single core CPUs
 * **Disk:** 4 GB for host OS + 20 GB for storing container images. (no swap)
 * **Network - Infrastructure:** A functional virtual/physical network with some usable IP addresses (can be public or private) . This can be on any cloud provider as well. You are free to use any network / ip scheme for yourself. In this guide, it will be `10.240.0.0/24`
 * **Network - Pod network:** A network IP range completely separate from other two networks, with subnet mask of `/16` or smaller (e.g. `/12`). This network will be subdivided into subnets later. In this guide it will be `10.200.0.0/16` . Please note that kubeadm does not support kubenet, so we need to use one of the CNI add-ons - such as flannel. By default Flannel sets up a pod network `10.244.0.0/16`, which means that we need to pass this pod network to `kubeadm init` (further below); or, modify the flannel configuration with the pod network of our own choice - before actually applying it blindly. :)
@@ -40,6 +43,7 @@ In this guide, I will setup a single node kubernetes cluster using **kubeadm** a
 * **OS:** Any recent version of Fedora/CentOS/RHEL or Debian based OS. This guide uses Fedora 28
 * **Disk Partitioning:** No swap - must disable swap partition during OS installation in order for the kubelet to work properly. See: [https://github.com/kubernetes/kubernetes/issues/53533](https://github.com/kubernetes/kubernetes/issues/53533) for details on why disable swap. Swap may seem a good idea, it is not - on Kubernetes!
 * **SELinux:** Disable SELinux / App Armour.
+* Should have some sort of DNS for infrastructure network.
 
 ## OS setup:
 
@@ -135,7 +139,7 @@ The above command installs additional packages, which are:
 [todo, to do] describe more detail about what is in those additional packages.
 
 
-At this time kubeadm is only installed - not run. Note that kubelet is set to start. Kubelet will continuously try to start and will fail (crashloop), because it will wait for kubeadm to tell it what to do. This crashloop is expected and normal. After you initialize your master (using kubeadm), the kubelet runs normally.
+At this time kubeadm is only installed - not run. Note that kubelet is set to start. Kubelet will continuously try to start and will fail (crash-loop), because it will wait for kubeadm to tell it what to do. This crashloop is expected and normal. After you initialize your master (using kubeadm), the kubelet runs normally.
 
 
 ## Run kubeadm on node1/master to setup the cluster:
@@ -195,7 +199,7 @@ CGROUPS_MEMORY: enabled
 [root@kubeadm-node1 ~]# 
 ```
 
-Of-course I installed the lastest docker-ce from the docker repository.
+Of-course I installed the latest docker-ce from the docker repository.
 
 ```
 [root@kubeadm-node1 ~]# yum list docker-ce
@@ -592,9 +596,10 @@ Run 'kubectl get nodes' on the master to see this node join the cluster.
 **Note:** I appended `--ignore-preflight-errors="SystemVerification"` to the `kubeadm join` command, becaue my first run without this command resulted in an error. It was simply kubeadm was not recognising the latest Docker-ce 18.09 . By this time of writing, kubeadm is only certified to work with docker-ce 18.06 . So I had to skip that test. Here is the error just for completion's sake:
 
 ```
-[root@kubeadm-node2 ~]# kubeadm join 10.240.0.31:6443 --token wmrvvj.3kmknfziy308ia0o --discovery-token-ca-cert-hash sha256:0e659353306c04c46295868b407d4eae754d91de2e0f19a852eda7de17cbe3a5
+[root@kubeadm-node2 ~]# kubeadm join 10.240.0.31:6443 --token wmrvvj.3kmknfziy308ia0o --discovery-token-ca-cert-hash sha256:0e659353306c04c46295868b407d4eae754d91de2e0f19a852eda7de17cbe3a5 --ignore-preflight-errors="SystemVerification"
+
 [preflight] running pre-flight checks
-	[WARNING RequiredIPVSKernelModulesAvailable]: the IPVS proxier will not be used, because the following required kernel modules are not loaded: [ip_vs ip_vs_rr ip_vs_wrr ip_vs_sh] or no builtin kernel ipvs support: map[ip_vs:{} ip_vs_rr:{} ip_vs_wrr:{} ip_vs_sh:{} nf_conntrack_ipv4:{}]
+	[WARNING RequiredIPVSKernelModulesAvailable]: the IPVS proxier will not be used, because the following required kernel modules are not loaded: [ip_vs ip_vs_rr ip_vs_wrr ip_vs_sh] or no builtin kernel ipvs support: map[ip_vs_rr:{} ip_vs_wrr:{} ip_vs_sh:{} nf_conntrack_ipv4:{} ip_vs:{}]
 you can solve this problem with following methods:
  1. Run 'modprobe -- ' to load missing kernel modules;
 2. Provide the missing builtin kernel ipvs support
@@ -629,10 +634,26 @@ CGROUPS_CPUSET: enabled
 CGROUPS_DEVICES: enabled
 CGROUPS_FREEZER: enabled
 CGROUPS_MEMORY: enabled
-[preflight] Some fatal errors occurred:
-	[ERROR SystemVerification]: unsupported docker version: 18.09.0
-[preflight] If you know what you are doing, you can make a check non-fatal with `--ignore-preflight-errors=...`
-[root@kubeadm-node2 ~]#
+	[WARNING SystemVerification]: unsupported docker version: 18.09.0
+[discovery] Trying to connect to API Server "10.240.0.31:6443"
+[discovery] Created cluster-info discovery client, requesting info from "https://10.240.0.31:6443"
+[discovery] Requesting info from "https://10.240.0.31:6443" again to validate TLS against the pinned public key
+[discovery] Cluster info signature and contents are valid and TLS certificate validates against pinned roots, will use API Server "10.240.0.31:6443"
+[discovery] Successfully established connection with API Server "10.240.0.31:6443"
+[kubelet] Downloading configuration for the kubelet from the "kubelet-config-1.12" ConfigMap in the kube-system namespace
+[kubelet] Writing kubelet configuration to file "/var/lib/kubelet/config.yaml"
+[kubelet] Writing kubelet environment file with flags to file "/var/lib/kubelet/kubeadm-flags.env"
+[preflight] Activating the kubelet service
+[tlsbootstrap] Waiting for the kubelet to perform the TLS Bootstrap...
+[patchnode] Uploading the CRI Socket information "/var/run/dockershim.sock" to the Node API object "kubeadm-node2" as an annotation
+
+This node has joined the cluster:
+* Certificate signing request was sent to apiserver and a response was received.
+* The Kubelet was informed of the new secure connection details.
+
+Run 'kubectl get nodes' on the master to see this node join the cluster.
+
+[root@kubeadm-node2 ~]# 
 ```
 
 If you check the list of nodes now, you should be able to see node2 too.
@@ -810,6 +831,7 @@ export PATH KUBECONFIG
 
 **Note:**
 The `admin.conf` file (`/etc/kubernetes/admin.conf` on master node, copied as `/home/student/.kube/config`) gives the user superuser privileges over the cluster. This file should be used very carefully. For normal users, it’s recommended to generate an unique credential, to which you whitelist privileges. You can do this with the `kubeadm alpha phase kubeconfig user --client-name <client-name>` command. This command will print out a KubeConfig file to STDOUT which you should save to a file and distribute to your user. After that, whitelist privileges by using `kubectl create (cluster)rolebinding`.
+
 
 
 

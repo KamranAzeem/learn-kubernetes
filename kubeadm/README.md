@@ -137,15 +137,12 @@ systemctl enable kubelet && systemctl start kubelet
 ```
 
 The above command installs additional packages, which are:
-* cri-tools
-* kubernetes-cni
-* socat
+* cri-tools  (command line utility to interact with container runtime, such as docker)
+* kubernetes-cni (binary files to provision container networking. The files are installed in `/opt/cni/bin`)
+* socat  (relay for bidirectional data transfer between two independent data channels, e.g. files, pipe, device, socket, program, etc.)
 
 
-[todo, to do] describe more detail about what is in those additional packages.
-
-
-At this time kubeadm is only installed - not run. Note that kubelet is set to start. Kubelet will continuously try to start and will fail (crash-loop), because it will wait for kubeadm to tell it what to do. This crashloop is expected and normal. After you initialize your master (using kubeadm), the kubelet runs normally.
+At this time kubeadm is only *installed* - not *run*. Note that kubelet is set to start. Kubelet will continuously try to start and will fail (crash-loop), because it will wait for kubeadm to tell it what to do. This crashloop is expected and normal. After you initialize your master (using kubeadm), the kubelet runs normally.
 
 
 ## Run kubeadm on node1/master to setup the cluster:
@@ -438,7 +435,7 @@ Saving to: ‘kube-flannel.yml’
 
 
 
-Now, apply this yaml file to the cluster, so the pod network could come up. Flannel is setup as a daemon-set and uses *host* networking of the node.
+Now, apply this yaml file to the cluster, so the pod network could come up. Flannel is setup as a *daemon-set* and uses *host* networking of the node.
 
 ```
 [student@kubeadm-node1 ~]$ kubectl apply -f kube-flannel.yml 

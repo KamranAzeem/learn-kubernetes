@@ -162,8 +162,10 @@ What `kubeadm init` does is, it goes through a series of phases, the first one b
 * Install CoreDNS addon by creating it as a *deployment* - using *pod* networking
 * Install kube-proxy addon by creating it as a *daemon-set* - using *host* networking
 
+Complete detail of all these phases can be found here: [https://kubernetes.io/docs/reference/setup-tools/kubeadm/implementation-details/](https://kubernetes.io/docs/reference/setup-tools/kubeadm/implementation-details/)
 
-So, lets initialize kubeadm!
+
+OK, enought talk! Lets initialize kubeadm!
 
 ```
 kubeadm init \

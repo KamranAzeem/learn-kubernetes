@@ -8,12 +8,18 @@ A video showing kubeadm cluster setup, (in Urdu language), using this guide, is 
 
 
 ## Setup / components / look and feel:
+The Kubernetes cluster discussed in this guide is a virtual cluster, created using virtual machines running on KVM/Libvirt, on a Fedora 28 host computer.
 
-### KubeAdm cluster components:
-![kubeadm-cluster.png](kubeadm-cluster.png)
+### KubeAdm cluster overview:
+| ![kubeadm-cluster-overview.png](kubeadm-cluster.png) |
+|:--:|
+| *Cluster compnents overview of a kubeadm based cluster* |
+
 
 ### KubeAdm cluster networks:
-![kubeadm-cluster-network-1.png](kubeadm-cluster-network-1.png)
+| ![kubeadm-cluster-networks.png](kubeadm-cluster-network-1.png) |
+|:--:|
+| *Cluster networks involved in a kubeadm based cluster* |
 
 ## Features and Limitations:
 * Possible to create multi-node kubernetes cluster compared to minikube.

@@ -156,7 +156,7 @@ What `kubeadm init` does is, it goes through a series of phases, the first one b
 * Generate self signed SSL certificates for all kubernetes components
 * Generate necessary kubeconfig files for components of the *control plane*, and the admin user, to be able to access API server with credentials, certificates, etc
 * Create and deploy **static pod** definitions of the *control plane* components directly through **kubelet**. You will see (later) that etcd, api-server, controller-manager and scheduler are deployed as plain pods, without being part of any replication-controller, deployment, or daemon-set. These pods are setup using *host* networking.
-* Create **kubelet** configration as *config-map* in the **kube-system** namespace - as soon as the control plane boots up and reports healthy
+* Create **kubelet** configuration as *config-map* in the **kube-system** namespace - as soon as the control plane boots up and reports healthy
 * Mark the master as **master**  by adding labels and taints
 * Create bootstrap tokens and RBAC rules so various components are able to access each other and do certain things, like automatic approval of CSRs, etc
 * Install CoreDNS addon by creating it as a *deployment* - using *pod* networking

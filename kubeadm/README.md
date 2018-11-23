@@ -13,7 +13,7 @@ The Kubernetes cluster discussed in this guide is a virtual cluster, created usi
 ### KubeAdm cluster overview:
 | ![kubeadm-cluster-overview.png](kubeadm-cluster-overview.png) |
 |:--:|
-| *Cluster compnents overview of a kubeadm based cluster* |
+| *Cluster components overview of a kubeadm based cluster* |
 
 
 ### KubeAdm cluster networks:

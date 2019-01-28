@@ -134,7 +134,10 @@ curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
 sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
 sudo apt-get update
 apt-cache policy docker-ce
-sudo apt-get install -y docker-ce
+
+#Installing specific version due to certification with kubeadm
+sudo apt-get install -y docker-ce=18.06.1~ce~3-0~ubuntu
+
 sudo apt-mark hold docker-ce
 sudo systemctl status docker
 
@@ -220,7 +223,7 @@ What `kubeadm init` does is, it goes through a series of phases, the first one b
 Complete detail of all these phases can be found here: [https://kubernetes.io/docs/reference/setup-tools/kubeadm/implementation-details/](https://kubernetes.io/docs/reference/setup-tools/kubeadm/implementation-details/)
 
 
-OK, enought talk! Lets initialize kubeadm!
+OK, enough talk! Lets initialize kubeadm!
 
 ```
 kubeadm init \
@@ -427,7 +430,7 @@ Administrator. It usually boils down to these three things:
 
 [sudo] password for student: 
 
-[student@kubeadm-node1 ~]$ sudo chown $(id -u):$(id -g) $HOME/.kube/config
+[student@kubeadm-node1 ~]$ sudo chown $(id -u):$(id -g) $HOME/.kube -R
 ```
 
 Check if you can talk to the cluster/API server:

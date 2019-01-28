@@ -72,6 +72,10 @@ sudo yum -y install ebtables
 sudo iptables -L 
 ```
 
+```
+sudo sed -i 's/^SELINUX=enforcing$/SELINUX=disabled/' /etc/selinux/config
+```
+
 Ubuntu:
 ```
 
@@ -122,6 +126,20 @@ sudo systemctl start docker
 sudo systemctl status docker
 ```
 
+### Ubuntu
+
+Source: https://www.digitalocean.com/community/tutorials/how-to-install-and-use-docker-on-ubuntu-16-04
+
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+sudo apt-get update
+apt-cache policy docker-ce
+sudo apt-get install -y docker-ce
+sudo apt-mark hold docker-ce
+sudo systemctl status docker
+
+
+
 ### Install kubeadm, kubelet and kubectl:
 On each node, install:
 * kubeadm: the command to actually setup / bootstrap the cluster.
@@ -144,9 +162,28 @@ exclude=kube*
 EOF
 ```
 
+
+#### Ubuntu
+
 ```
-sudo sed -i 's/^SELINUX=enforcing$/SELINUX=disabled/' /etc/selinux/config
+#Add Google's apt repository gpg key
+curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
+
+#Add the Kubernetes apt repository
+sudo bash -c 'cat <<EOF >/etc/apt/sources.list.d/kubernetes.list
+deb https://apt.kubernetes.io/ kubernetes-xenial main
+EOF'
+
+#Install the required packages, if needed we can request a specific version
+sudo apt-get install -y kubelet kubeadm kubectl
+sudo apt-mark hold kubelet kubeadm kubectl
 ```
+
+
+
+----
+
+
 
 ```
 yum install -y kubelet kubeadm kubectl --disableexcludes=kubernetes

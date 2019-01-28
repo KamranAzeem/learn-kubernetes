@@ -834,6 +834,12 @@ replicaset.apps/coredns-576cbf47c7   2         2         2       95m   coredns  
 
 # Accessing your cluster from machines other than the master node:
 
+## Add windows section TODO
+kubectl --kubeconfig=C:\Users\<user>\.kube\config.kubeadm get pods
+
+export KUBECONFIG=$KUBECONFIG:$HOME/.kube/config:$HOME/.kube/kubeadm-cluster.conf (modified in settings. find script!)
+
+
 So far, we are able to talk to our Kubernetes cluster from node1, as user student. It is because that is where we have configured our `.kube/config` which is used by `kubectl` commands. To be able to access the cluster from some other computer, such as your work computer, etc, you need to copy the administrator kubeconfig file from your master node to your computer like this:
 
 ```

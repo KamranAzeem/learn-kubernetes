@@ -1,4 +1,4 @@
-# KubeAdm based kubernetes cluster - ubuntu 18.xx
+# KubeAdm based kubernetes cluster - ubuntu 18.04
 
 Reference documentation: [https://kubernetes.io/docs/setup/independent/install-kubeadm/](https://kubernetes.io/docs/setup/independent/install-kubeadm/)
 
@@ -26,7 +26,7 @@ The Kubernetes cluster discussed in this guide is a virtual cluster, created usi
 * It creates a single node master. No High Availability for master node available yet.
 * You can create/join one or more **dedicated** worker-nodes.
 * Being multi-node in nature, allows you to use multi-node features such as [advance scheduling policies](https://kubernetes.io/blog/2017/03/advanced-scheduling-in-kubernetes/).
-* Services of type **LoadBalancer** still not possible
+* Services of type **LoadBalancer** still not possible - though you can use ingress!
 * Choice of using different container engines, such as Docker, Rocket, etc. This is not possible in MiniKube.
 * Choice of wide variety of (CNI-based) network plugins to be used for pod networking. This is not possible in MiniKube.
 * Supports cluster expansion, upgrades, downgrade, etc.
@@ -41,14 +41,14 @@ In this guide, I will setup a single node kubernetes cluster using **kubeadm** a
 * **CPU:** Minimum 2 CPU for master node; worker nodes can live with single core CPUs
 * **Disk:** 4 GB for host OS + 20 GB for storing container images. (no swap)
 * **Network - Infrastructure:** A functional virtual/physical network with some usable IP addresses (can be public or private) . This can be on any cloud provider as well. You are free to use any network / ip scheme for yourself. In this guide, it will be `10.240.0.0/24`
-* **Network - Pod network:** A network IP range completely separate from other two networks, with subnet mask of `/16` or smaller (e.g. `/12`). This network will be subdivided into subnets later. In this guide it will be `10.200.0.0/16` . Please note that kubeadm does not support kubenet, so we need to use one of the CNI add-ons - such as flannel. By default Flannel sets up a pod network `10.244.0.0/16`, which means that we need to pass this pod network to `kubeadm init` (further below); or, modify the flannel configuration with the pod network of our own choice - before actually applying it blindly. :)
+* **Network - Pod network:** A network IP range completely separate from other two networks, with subnet mask of `/16` or smaller (e.g. `/12`). This network will be subdivided into subnets later. In this guide it will be `10.200.0.0/16` . Please note that kubeadm does not support kubenet, so we need to use one of the CNI add-ons - such as flannel. By default Flannel sets up a pod network `10.244.0.0/16`, which means that we need to pass this pod network to `kubeadm init` (further below); or, modify the flannel configuration with the pod network of our own choice - before actually applying it blindly. :) 
 * **Network - Service network:** A network IP range completely separate from other two networks, used by the services. This will be considered a completely virtual network. The default service network configured by kubeadm is `10.96.0.0/12`. In this guide, it will be `10.32.0.0/16`.
-* **Firewall:** Disable Firewall (including removing the firewalld package), or open the following ports on each type of node, after the OS installation is complete. 
+* **Firewall:** Disable Firewall completely (including removing the firewalld package); or open the following ports on each type of node, after the OS installation is complete. The list below is for allowing traffic within the cluster infrastructure network. From outside the cluster network - .e.g from client network - you only need to allow port 6443 to the master node; and port 22 for all linux nodes (Master + Workers). You also need to allow port 80 and 443 to pass through the firewall towards your worker nodes. This actually depends on where your ingress controller will be running. If it will be run as daemon-set or deployment on the same cluster, then you need incoming 80/443 traffic to reach your nodes. If the ingress controller runs as a separate VM in the same k8s cluster, then you allow 22,80,443 towards the proxy/ingress-controller VM(s) only. The list below is for the traffic within the cluster infrastructure network.
 * **Firewall/ports - Master:** Incoming open (22, 6443, 10250, 10251, 10252, 2379, 2380)
-* **Firewall/ports - Worker:** Incoming open (22, 10250, 30000-32767)
-* **OS:** Any recent version of Fedora/CentOS/RHEL or Debian based OS. This guide uses Ubuntu 18.xx
+* **Firewall/ports - Workers:** Incoming open (22, 10250, 30000-32767)
+* **OS:** Any recent version of Fedora/CentOS/RHEL or Debian based OS. This guide uses Ubuntu 18.04
 * **Disk Partitioning:** No swap - must disable swap partition during OS installation in order for the kubelet to work properly. See: [https://github.com/kubernetes/kubernetes/issues/53533](https://github.com/kubernetes/kubernetes/issues/53533) for details on why disable swap. Swap may seem a good idea, it is not - on Kubernetes!  (`swapon -s` will give you the summary of swap devices)
-* **SELinux:** Disable SELinux / App Armour.
+* **SELinux:** Disable SELinux / App Armor.
 * Should have some sort of DNS for infrastructure network.
 
 ## OS setup:
@@ -64,19 +64,23 @@ Have DNS or local name resolution setup correctly.
 10.240.0.33	kubeadm-node3
 ```
 
-Disable Ubuntu firewall and app-armour:
-
+Disable Ubuntu firewall and app-armor:
+Remember, this step is for test/development/learning. If you are using this guide for production, then please ensure that you have the right Firewall and AppArmor setup in place - depending on your requirements.
 
 ```
+sudo ufw disable
+
 service apparmor stop
 service apparmor teardown
 /usr/sbin/update-rc.d -f apparmor remove
 
 dpkg -r apparmor libapparmor-perl libapparmor1
+```
 
-sudo aa-status
-sudo ufw disable
+Verify that firewall and AppArmor are disabled:
+```
 sudo iptables -L
+sudo aa-status
 ```
 
 

@@ -141,6 +141,7 @@ deb https://apt.kubernetes.io/ kubernetes-xenial main
 EOF'
 
 #Install the required packages, if needed we can request a specific version
+sudo apt-get update
 sudo apt-get install -y kubelet kubeadm kubectl
 sudo apt-mark hold kubelet kubeadm kubectl
 

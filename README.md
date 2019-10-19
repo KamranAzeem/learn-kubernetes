@@ -3,5 +3,5 @@ A repository to help learn kubernetes - mostly connected to the [training videos
 
 * Katas for learning and practicing Kubernetes concepts are [here](https://github.com/KamranAzeem/kubernetes-katas).
 
-* The related presentation is:** [here](https://docs.google.com/presentation/d/1WfshFCYPizcjeA-oBYV7l1JUezl75q8Jxd4IuXnilbs/edit?usp=sharing)
+* The related presentation is [here](https://docs.google.com/presentation/d/1WfshFCYPizcjeA-oBYV7l1JUezl75q8Jxd4IuXnilbs/edit?usp=sharing)
 * Book by yours truly - still work in progress is here: [https://github.com/Praqma/kubernetes-ebook](https://github.com/Praqma/kubernetes-ebook)

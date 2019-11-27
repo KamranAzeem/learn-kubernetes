@@ -1,4 +1,4 @@
-# KubeAdm based kubernetes cluster - ubuntu 18.04
+# KubeAdm based kubernetes cluster
 
 Reference documentation: [https://kubernetes.io/docs/setup/independent/install-kubeadm/](https://kubernetes.io/docs/setup/independent/install-kubeadm/)
 
@@ -8,7 +8,7 @@ A video showing kubeadm cluster setup, (in Urdu language), using this guide, is 
 
 
 ## Setup / components / look and feel:
-The Kubernetes cluster discussed in this guide is a virtual cluster, created using virtual machines.
+The Kubernetes cluster discussed in this guide is a virtual cluster, created using virtual machines running on KVM/Libvirt, on a Fedora 28 host computer.
 
 ### KubeAdm cluster overview:
 | ![kubeadm-cluster-overview.png](kubeadm-cluster-overview.png) |
@@ -26,7 +26,7 @@ The Kubernetes cluster discussed in this guide is a virtual cluster, created usi
 * It creates a single node master. No High Availability for master node available yet.
 * You can create/join one or more **dedicated** worker-nodes.
 * Being multi-node in nature, allows you to use multi-node features such as [advance scheduling policies](https://kubernetes.io/blog/2017/03/advanced-scheduling-in-kubernetes/).
-* Services of type **LoadBalancer** still not possible - though you can use ingress!
+* Services of type **LoadBalancer** still not possible
 * Choice of using different container engines, such as Docker, Rocket, etc. This is not possible in MiniKube.
 * Choice of wide variety of (CNI-based) network plugins to be used for pod networking. This is not possible in MiniKube.
 * Supports cluster expansion, upgrades, downgrade, etc.
@@ -41,19 +41,18 @@ In this guide, I will setup a single node kubernetes cluster using **kubeadm** a
 * **CPU:** Minimum 2 CPU for master node; worker nodes can live with single core CPUs
 * **Disk:** 4 GB for host OS + 20 GB for storing container images. (no swap)
 * **Network - Infrastructure:** A functional virtual/physical network with some usable IP addresses (can be public or private) . This can be on any cloud provider as well. You are free to use any network / ip scheme for yourself. In this guide, it will be `10.240.0.0/24`
-* **Network - Pod network:** A network IP range completely separate from other two networks, with subnet mask of `/16` or smaller (e.g. `/12`). This network will be subdivided into subnets later. In this guide it will be `10.200.0.0/16` . Please note that kubeadm does not support kubenet, so we need to use one of the CNI add-ons - such as flannel. By default Flannel sets up a pod network `10.244.0.0/16`, which means that we need to pass this pod network to `kubeadm init` (further below); or, modify the flannel configuration with the pod network of our own choice - before actually applying it blindly. :) 
+* **Network - Pod network:** A network IP range completely separate from other two networks, with subnet mask of `/16` or smaller (e.g. `/12`). This network will be subdivided into subnets later. In this guide it will be `10.200.0.0/16` . Please note that kubeadm does not support kubenet, so we need to use one of the CNI add-ons - such as flannel. By default Flannel sets up a pod network `10.244.0.0/16`, which means that we need to pass this pod network to `kubeadm init` (further below); or, modify the flannel configuration with the pod network of our own choice - before actually applying it blindly. :)
 * **Network - Service network:** A network IP range completely separate from other two networks, used by the services. This will be considered a completely virtual network. The default service network configured by kubeadm is `10.96.0.0/12`. In this guide, it will be `10.32.0.0/16`.
-* **Firewall:** Disable Firewall completely (including removing the firewalld package); or open the following ports on each type of node, after the OS installation is complete. The list below is for allowing traffic within the cluster infrastructure network. From outside the cluster network - .e.g from client network - you only need to allow port 6443 to the master node; and port 22 for all linux nodes (Master + Workers). You also need to allow port 80 and 443 to pass through the firewall towards your worker nodes. This actually depends on where your ingress controller will be running. If it will be run as daemon-set or deployment on the same cluster, then you need incoming 80/443 traffic to reach your nodes. If the ingress controller runs as a separate VM in the same k8s cluster, then you allow 22,80,443 towards the proxy/ingress-controller VM(s) only. The list below is for the traffic within the cluster infrastructure network.
+* **Firewall:** Disable Firewall (including removing the firewalld package), or open the following ports on each type of node, after the OS installation is complete. 
 * **Firewall/ports - Master:** Incoming open (22, 6443, 10250, 10251, 10252, 2379, 2380)
-* **Firewall/ports - Workers:** Incoming open (22, 10250, 30000-32767)
-* **OS:** Any recent version of Fedora/CentOS/RHEL or Debian based OS. This guide uses Ubuntu 18.04
-* **Disk Partitioning:** No swap - must disable swap partition during OS installation in order for the kubelet to work properly. See: [https://github.com/kubernetes/kubernetes/issues/53533](https://github.com/kubernetes/kubernetes/issues/53533) for details on why disable swap. Swap may seem a good idea, it is not - on Kubernetes!  (`swapon -s` will give you the summary of swap devices)
-* **SELinux:** Disable SELinux / App Armor.
+* **Firewall/ports - Worker:** Incoming open (22, 10250, 30000-32767)
+* **OS:** Any recent version of Fedora/CentOS/RHEL or Debian based OS. This guide uses Fedora 28
+* **Disk Partitioning:** No swap - must disable swap partition during OS installation in order for the kubelet to work properly. See: [https://github.com/kubernetes/kubernetes/issues/53533](https://github.com/kubernetes/kubernetes/issues/53533) for details on why disable swap. Swap may seem a good idea, it is not - on Kubernetes!
+* **SELinux:** Disable SELinux / App Armour.
 * Should have some sort of DNS for infrastructure network.
 
 ## OS setup:
 
-Have DNS or local name resolution setup correctly.
 ```
 [root@kworkhorse lib]# cat /etc/hosts
 127.0.0.1   localhost localhost.localdomain
@@ -64,27 +63,13 @@ Have DNS or local name resolution setup correctly.
 10.240.0.33	kubeadm-node3
 ```
 
-Disable Ubuntu firewall and app-armor:
-Remember, this step is for test/development/learning. If you are using this guide for production, then please ensure that you have the right Firewall and AppArmor setup in place - depending on your requirements.
-
 ```
-sudo ufw disable
+sudo yum -y remove firewalld
 
-service apparmor stop
-service apparmor teardown
-/usr/sbin/update-rc.d -f apparmor remove
-
-dpkg -r apparmor libapparmor-perl libapparmor1
+sudo yum -y install ebtables
 ```
 
-Verify that firewall and AppArmor are disabled:
-```
-sudo iptables -L
-sudo aa-status
-```
-
-
-Enable the certain sysctl setting `net.bridge.bridge-nf-call-iptables`
+Enable the sysctl setting `net.bridge.bridge-nf-call-iptables`
 ```
 cat <<EOF >  /etc/sysctl.d/k8s.conf
 net.bridge.bridge-nf-call-ip6tables = 1
@@ -99,28 +84,25 @@ sysctl --system
 Reference: [https://kubernetes.io/docs/setup/cri/](https://kubernetes.io/docs/setup/cri/)
 You can select other runtimes too, such as Rocket (rkt). I will use Docker.
 
-**Note:** DO NOT install docker from default Ububtu apt repo, that is old version of Docker.
+**Note:** DO NOT install docker from default Fedora/CentOS repository, that is a very old version of Docker.
 
 On all nodes (master+worker), install Docker.
-
-Reference: [https://www.digitalocean.com/community/tutorials/how-to-install-and-use-docker-on-ubuntu-16-04](https://www.digitalocean.com/community/tutorials/how-to-install-and-use-docker-on-ubuntu-16-04)
+```
+sudo dnf config-manager \
+    --add-repo \
+    https://download.docker.com/linux/fedora/docker-ce.repo
+```
 
 
 ```
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
-sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
-sudo apt-get update
-apt-cache policy docker-ce
+sudo dnf install docker-ce
+```
 
-#Installing specific version of docker, because it is certified to work with kubeadm
-sudo apt-get install -y docker-ce=18.06.1~ce~3-0~ubuntu
-
-sudo apt-mark hold docker-ce
+```
+sudo systemctl enable docker
+sudo systemctl start docker
 sudo systemctl status docker
 ```
-
-
-
 
 ### Install kubeadm, kubelet and kubectl:
 On each node, install:
@@ -132,23 +114,35 @@ On each node, install:
 All of the above three pieces of software are available from kubernetes's yum repository. So first, set that up:
 
 ```
-#Add Google's apt repository gpg key
-curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
+cat <<EOF > /etc/yum.repos.d/kubernetes.repo
+[kubernetes]
+name=Kubernetes
+baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-x86_64
+enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=https://packages.cloud.google.com/yum/doc/yum-key.gpg https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+exclude=kube*
+EOF
+```
 
-#Add the Kubernetes apt repository
-sudo bash -c 'cat <<EOF >/etc/apt/sources.list.d/kubernetes.list
-deb https://apt.kubernetes.io/ kubernetes-xenial main
-EOF'
+```
+sudo sed -i 's/^SELINUX=enforcing$/SELINUX=disabled/' /etc/selinux/config
+```
 
-#Install the required packages, if needed we can request a specific version
-sudo apt-get update
-sudo apt-get install -y kubelet kubeadm kubectl
-sudo apt-mark hold kubelet kubeadm kubectl
+```
+yum install -y kubelet kubeadm kubectl --disableexcludes=kubernetes
 
 systemctl enable kubelet && systemctl start kubelet
 ```
 
-At this time `kubeadm` is only *installed* - not *run*. Note that kubelet is set to start. Kubelet will continuously try to start and will fail (crash-loop), because it will wait for kubeadm to tell it what to do. This crashloop is expected and normal. After you initialize your master (using kubeadm), the kubelet runs normally.
+The above command installs additional packages, which are:
+* cri-tools  (command line utility to interact with container runtime, such as docker)
+* kubernetes-cni (binary files to provision container networking. The files are installed in `/opt/cni/bin`)
+* socat  (relay for bidirectional data transfer between two independent data channels, e.g. files, pipe, device, socket, program, etc.)
+
+
+At this time kubeadm is only *installed* - not *run*. Note that kubelet is set to start. Kubelet will continuously try to start and will fail (crash-loop), because it will wait for kubeadm to tell it what to do. This crashloop is expected and normal. After you initialize your master (using kubeadm), the kubelet runs normally.
 
 
 ## Run kubeadm on node1/master to setup the cluster:
@@ -171,7 +165,7 @@ What `kubeadm init` does is, it goes through a series of phases, the first one b
 Complete detail of all these phases can be found here: [https://kubernetes.io/docs/reference/setup-tools/kubeadm/implementation-details/](https://kubernetes.io/docs/reference/setup-tools/kubeadm/implementation-details/)
 
 
-OK, enough talk! Lets initialize kubeadm (on master node only)!
+OK, enought talk! Lets initialize kubeadm!
 
 ```
 kubeadm init \
@@ -183,10 +177,75 @@ kubeadm init \
 
 
 
+So the first attempt results in the following:
+```
+[root@kubeadm-node1 ~]# kubeadm init \
+>   --pod-network-cidr "10.200.0.0/16" \
+>   --service-cidr "10.32.0.0/16"
+[init] using Kubernetes version: v1.12.2
+[preflight] running pre-flight checks
+[preflight] The system verification failed. Printing the output from the verification:
+KERNEL_VERSION: 4.18.17-200.fc28.x86_64
+CONFIG_NAMESPACES: enabled
+CONFIG_NET_NS: enabled
+CONFIG_PID_NS: enabled
+CONFIG_IPC_NS: enabled
+CONFIG_UTS_NS: enabled
+CONFIG_CGROUPS: enabled
+CONFIG_CGROUP_CPUACCT: enabled
+CONFIG_CGROUP_DEVICE: enabled
+CONFIG_CGROUP_FREEZER: enabled
+CONFIG_CGROUP_SCHED: enabled
+CONFIG_CPUSETS: enabled
+CONFIG_MEMCG: enabled
+CONFIG_INET: enabled
+CONFIG_EXT4_FS: enabled
+CONFIG_PROC_FS: enabled
+CONFIG_NETFILTER_XT_TARGET_REDIRECT: enabled (as module)
+CONFIG_NETFILTER_XT_MATCH_COMMENT: enabled (as module)
+CONFIG_OVERLAY_FS: enabled (as module)
+CONFIG_AUFS_FS: not set - Required for aufs.
+CONFIG_BLK_DEV_DM: enabled
+DOCKER_VERSION: 18.09.0
+OS: Linux
+CGROUPS_CPU: enabled
+CGROUPS_CPUACCT: enabled
+CGROUPS_CPUSET: enabled
+CGROUPS_DEVICES: enabled
+CGROUPS_FREEZER: enabled
+CGROUPS_MEMORY: enabled
+[preflight] Some fatal errors occurred:
+	[ERROR SystemVerification]: unsupported docker version: 18.09.0
+[preflight] If you know what you are doing, you can make a check non-fatal with `--ignore-preflight-errors=...`
+[root@kubeadm-node1 ~]# 
+```
+
+Of-course I installed the latest docker-ce from the docker repository.
+
+```
+[root@kubeadm-node1 ~]# yum list docker-ce
+Last metadata expiration check: 6:32:42 ago on Sun 11 Nov 2018 02:39:13 PM CET.
+Installed Packages
+docker-ce.x86_64                                           3:18.09.0-3.fc28                                            @docker-ce-stable
+[root@kubeadm-node1 ~]# 
+```
+
+And, I have the following version for kubeadm:
+
+```
+[root@kubeadm-node1 ~]# kubeadm version
+kubeadm version: &version.Info{Major:"1", Minor:"12", GitVersion:"v1.12.2", GitCommit:"17c77c7898218073f14c8d573582e8d2313dc740", GitTreeState:"clean", BuildDate:"2018-10-24T06:51:33Z", GoVersion:"go1.10.4", Compiler:"gc", Platform:"linux/amd64"}
+[root@kubeadm-node1 ~]# 
+```
+
+
+I can downgrade docker to 18.06 , which is certified with kubeadm, but I can try to use docker 18.09 by asking kubeadm to skip this test.
+
 ```
 [root@kubeadm-node1 ~]# kubeadm init  \
   --pod-network-cidr "10.200.0.0/16" \
-  --service-cidr "10.32.0.0/16"
+  --service-cidr "10.32.0.0/16" \
+  --ignore-preflight-errors="SystemVerification"
 ```
 
 
@@ -220,7 +279,7 @@ CONFIG_NETFILTER_XT_MATCH_COMMENT: enabled (as module)
 CONFIG_OVERLAY_FS: enabled (as module)
 CONFIG_AUFS_FS: not set - Required for aufs.
 CONFIG_BLK_DEV_DM: enabled
-DOCKER_VERSION: 18.06.1
+DOCKER_VERSION: 18.09.0
 OS: Linux
 CGROUPS_CPU: enabled
 CGROUPS_CPUACCT: enabled
@@ -228,6 +287,7 @@ CGROUPS_CPUSET: enabled
 CGROUPS_DEVICES: enabled
 CGROUPS_FREEZER: enabled
 CGROUPS_MEMORY: enabled
+	[WARNING SystemVerification]: unsupported docker version: 18.09.0
 [preflight/images] Pulling images required for setting up a Kubernetes cluster
 [preflight/images] This might take a minute or two, depending on the speed of your internet connection
 [preflight/images] You can also perform this action in beforehand using 'kubeadm config images pull'
@@ -312,7 +372,7 @@ Administrator. It usually boils down to these three things:
 
 [sudo] password for student: 
 
-[student@kubeadm-node1 ~]$ sudo chown $(id -u):$(id -g) $HOME/.kube -R
+[student@kubeadm-node1 ~]$ sudo chown $(id -u):$(id -g) $HOME/.kube/config
 ```
 
 Check if you can talk to the cluster/API server:
@@ -352,7 +412,7 @@ Check [https://github.com/coreos/flannel/blob/master/Documentation/kubernetes.md
 Download the flannel.yaml file and adjust the pod network with the one we chose (10.200.0.0/16) 
 
 ```
-[student@kubeadm-node1 ~]$ wget kubectl https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml
+[student@kubeadm-node1 ~]$ wget https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml
 --2018-11-11 22:05:05--  https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml
 
 Saving to: ‘kube-flannel.yml’
@@ -496,8 +556,7 @@ So we can do that now. Please note that the token is only valid for 24 hours aft
 
 
 ```
-[root@kubeadm-node2 ~]# kubeadm join 10.240.0.31:6443 --token wmrvvj.3kmknfziy308ia0o --discovery-token-ca-cert-hash sha256:0e659353306c04c46295868b407d4eae754d91de2e0f19a852eda7de17cbe3a5
-
+[root@kubeadm-node2 ~]# kubeadm join 10.240.0.31:6443 --token wmrvvj.3kmknfziy308ia0o --discovery-token-ca-cert-hash sha256:0e659353306c04c46295868b407d4eae754d91de2e0f19a852eda7de17cbe3a5 --ignore-preflight-errors="SystemVerification"
 [preflight] running pre-flight checks
 	[WARNING RequiredIPVSKernelModulesAvailable]: the IPVS proxier will not be used, because the following required kernel modules are not loaded: [ip_vs_sh ip_vs ip_vs_rr ip_vs_wrr] or no builtin kernel ipvs support: map[ip_vs:{} ip_vs_rr:{} ip_vs_wrr:{} ip_vs_sh:{} nf_conntrack_ipv4:{}]
 you can solve this problem with following methods:
@@ -534,6 +593,7 @@ CGROUPS_CPUSET: enabled
 CGROUPS_DEVICES: enabled
 CGROUPS_FREEZER: enabled
 CGROUPS_MEMORY: enabled
+	[WARNING SystemVerification]: unsupported docker version: 18.09.0
 [discovery] Trying to connect to API Server "10.240.0.31:6443"
 [discovery] Created cluster-info discovery client, requesting info from "https://10.240.0.31:6443"
 [discovery] Requesting info from "https://10.240.0.31:6443" again to validate TLS against the pinned public key
@@ -555,6 +615,68 @@ Run 'kubectl get nodes' on the master to see this node join the cluster.
 [root@kubeadm-node2 ~]#
 ```
 
+**Note:** I appended `--ignore-preflight-errors="SystemVerification"` to the `kubeadm join` command, becaue my first run without this command resulted in an error. It was simply kubeadm was not recognising the latest Docker-ce 18.09 . By this time of writing, kubeadm is only certified to work with docker-ce 18.06 . So I had to skip that test. Here is the error just for completion's sake:
+
+```
+[root@kubeadm-node2 ~]# kubeadm join 10.240.0.31:6443 --token wmrvvj.3kmknfziy308ia0o --discovery-token-ca-cert-hash sha256:0e659353306c04c46295868b407d4eae754d91de2e0f19a852eda7de17cbe3a5 --ignore-preflight-errors="SystemVerification"
+
+[preflight] running pre-flight checks
+	[WARNING RequiredIPVSKernelModulesAvailable]: the IPVS proxier will not be used, because the following required kernel modules are not loaded: [ip_vs ip_vs_rr ip_vs_wrr ip_vs_sh] or no builtin kernel ipvs support: map[ip_vs_rr:{} ip_vs_wrr:{} ip_vs_sh:{} nf_conntrack_ipv4:{} ip_vs:{}]
+you can solve this problem with following methods:
+ 1. Run 'modprobe -- ' to load missing kernel modules;
+2. Provide the missing builtin kernel ipvs support
+
+[preflight] The system verification failed. Printing the output from the verification:
+KERNEL_VERSION: 4.18.17-200.fc28.x86_64
+CONFIG_NAMESPACES: enabled
+CONFIG_NET_NS: enabled
+CONFIG_PID_NS: enabled
+CONFIG_IPC_NS: enabled
+CONFIG_UTS_NS: enabled
+CONFIG_CGROUPS: enabled
+CONFIG_CGROUP_CPUACCT: enabled
+CONFIG_CGROUP_DEVICE: enabled
+CONFIG_CGROUP_FREEZER: enabled
+CONFIG_CGROUP_SCHED: enabled
+CONFIG_CPUSETS: enabled
+CONFIG_MEMCG: enabled
+CONFIG_INET: enabled
+CONFIG_EXT4_FS: enabled
+CONFIG_PROC_FS: enabled
+CONFIG_NETFILTER_XT_TARGET_REDIRECT: enabled (as module)
+CONFIG_NETFILTER_XT_MATCH_COMMENT: enabled (as module)
+CONFIG_OVERLAY_FS: enabled (as module)
+CONFIG_AUFS_FS: not set - Required for aufs.
+CONFIG_BLK_DEV_DM: enabled
+DOCKER_VERSION: 18.09.0
+OS: Linux
+CGROUPS_CPU: enabled
+CGROUPS_CPUACCT: enabled
+CGROUPS_CPUSET: enabled
+CGROUPS_DEVICES: enabled
+CGROUPS_FREEZER: enabled
+CGROUPS_MEMORY: enabled
+	[WARNING SystemVerification]: unsupported docker version: 18.09.0
+[discovery] Trying to connect to API Server "10.240.0.31:6443"
+[discovery] Created cluster-info discovery client, requesting info from "https://10.240.0.31:6443"
+[discovery] Requesting info from "https://10.240.0.31:6443" again to validate TLS against the pinned public key
+[discovery] Cluster info signature and contents are valid and TLS certificate validates against pinned roots, will use API Server "10.240.0.31:6443"
+[discovery] Successfully established connection with API Server "10.240.0.31:6443"
+[kubelet] Downloading configuration for the kubelet from the "kubelet-config-1.12" ConfigMap in the kube-system namespace
+[kubelet] Writing kubelet configuration to file "/var/lib/kubelet/config.yaml"
+[kubelet] Writing kubelet environment file with flags to file "/var/lib/kubelet/kubeadm-flags.env"
+[preflight] Activating the kubelet service
+[tlsbootstrap] Waiting for the kubelet to perform the TLS Bootstrap...
+[patchnode] Uploading the CRI Socket information "/var/run/dockershim.sock" to the Node API object "kubeadm-node2" as an annotation
+
+This node has joined the cluster:
+* Certificate signing request was sent to apiserver and a response was received.
+* The Kubelet was informed of the new secure connection details.
+
+Run 'kubectl get nodes' on the master to see this node join the cluster.
+
+[root@kubeadm-node2 ~]# 
+```
 
 If you check the list of nodes now, you should be able to see node2 too.
 
@@ -797,15 +919,6 @@ KUBECONFIG=$KUBECONFIG:$HOME/.kube/config:$HOME/.kube/kubeadm-cluster.conf
 
 export PATH KUBECONFIG
 ```
-
-## Running kubectl from windows clients 
-The procedure is almost the same as above except that you need to setup the KUBECONFIG environment variable somewhere in windows settings. 
-
-A kubectl connectivity test from windows command line would look something like this:
-```
-kubectl --kubeconfig=C:\Users\joe\.kube\config.kubeadm get pods
-```
-
 
 
 **Note:**

@@ -23,10 +23,10 @@ The Kubernetes cluster discussed in this guide is a virtual cluster, created usi
 
 ## Features and Limitations:
 * Possible to create multi-node kubernetes cluster compared to minikube.
-* It creates a single node master. No High Availability for master node available yet.
+* It creates a single node master, which can work as a worker node too. High Availability for master node not available yet.
 * You can create/join one or more **dedicated** worker-nodes.
 * Being multi-node in nature, allows you to use multi-node features such as [advance scheduling policies](https://kubernetes.io/blog/2017/03/advanced-scheduling-in-kubernetes/).
-* Services of type **LoadBalancer** still not possible
+* Services of type **LoadBalancer** still not possible; though you can install [Metal-LB](https://metallb.universe.tf/)
 * Choice of using different container engines, such as Docker, Rocket, etc. This is not possible in MiniKube.
 * Choice of wide variety of (CNI-based) network plugins to be used for pod networking. This is not possible in MiniKube.
 * Supports cluster expansion, upgrades, downgrade, etc.

@@ -7,7 +7,9 @@ Kubeadm helps you setup/bootstrap a minimum viable/usable Kubernetes cluster tha
 A video showing kubeadm cluster setup, (in Urdu language), using this guide, is available at: [https://youtu.be/FRvkSlIUimM](https://youtu.be/FRvkSlIUimM)
 
 Below are different flavors of this guide:
-* Kubeadm on RedHat/CentOS/Fedora - using Flannel for pod network: [kubeadm-fedora-flannel.md](kubeadm-fedora-flannel.md)
-* Kubeadm on RedHat/CentOS/Fedora - using Calico for pod network: [kubeadm-fedora-calico.md](kubeadm-fedora-calico.md)
+* Kubeadm on RedHat/CentOS/Fedora (33) - using Flannel for pod network: [kubeadm-fedora-flannel.md](kubeadm-fedora-flannel.md)
+* Kubeadm on RedHat/CentOS/Fedora (33) - using Calico for pod network: [kubeadm-fedora-calico.md](kubeadm-fedora-calico.md)
 * Kubeadm on Debian/Ubuntu: [kubeadm-ubuntu-flannel.md](kubeadm-ubuntu-flannel.md)
 
+Supplementary documents:
+* [kubeadm-install-specific-version.md](kubeadm-install-specific-version.md)

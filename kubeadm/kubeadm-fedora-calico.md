@@ -40,7 +40,7 @@ In this guide, I will setup a single node kubernetes cluster using **kubeadm** a
 
 
 ## Preparation:
-* **RAM:** Minimum 1 GB RAM for each node (master+worker); you will only be able to run very few (and very small) containers, like nginx, mysql, etc.
+* **RAM:** Minimum 1 GB RAM for each node (master+worker); you will only be able to run very few (and very small) containers, like nginx, mysql, etc. **2 GB RAM is better**.
 * **CPU:** Minimum 2 CPU for master node; worker nodes can live with single core CPUs
 * **Disk:** 4 GB for host OS + 20 GB for storing container images. (no swap)
 * **Network - Infrastructure:** A functional virtual/physical network with some usable IP addresses (can be public or private) . This can be on any cloud provider as well. You are free to use any network / ip scheme for yourself. In this guide, it will be `10.240.0.0/24`
@@ -49,7 +49,7 @@ In this guide, I will setup a single node kubernetes cluster using **kubeadm** a
 * **Firewall:** Disable Firewall (including removing the firewalld package), or open the following ports on each type of node, after the OS installation is complete. 
 * **Firewall/ports - Master:** Incoming open (22, 6443, 10250, 10251, 10252, 2379, 2380)
 * **Firewall/ports - Worker:** Incoming open (22, 10250, 30000-32767)
-* **OS:** Any recent version of Fedora/CentOS/RHEL or Debian based OS. This guide uses Fedora 28
+* **OS:** Any recent version of Fedora/CentOS/RHEL or Debian based OS. This guide uses Fedora 33
 * **Disk Partitioning:** No swap - must disable swap partition during OS installation in order for the kubelet to work properly. See: [https://github.com/kubernetes/kubernetes/issues/53533](https://github.com/kubernetes/kubernetes/issues/53533) for details on why disable swap. Swap may seem a good idea, it is not - on Kubernetes!
 * **SELinux:** Disable SELinux / App Armour.
 * Should have some sort of DNS for infrastructure network.
@@ -69,7 +69,7 @@ In this guide, I will setup a single node kubernetes cluster using **kubeadm** a
 ```
 sudo yum -y remove firewalld
 
-sudo yum -y install ebtables
+sudo yum -y install ebtables iproute-tc
 ```
 
 ```
@@ -428,6 +428,9 @@ systemctl enable kubelet
 systemctl start kubelet
 ```
 
+**Note:** if you want to install a specific version of Kubernetes in your cluster - say `1.19.7` -  then you need a matching version of **kubelet** - and bit less importantly - matching version of **`kubeadm`** and **`kubeadm`**. Refer to: [kubeadm-install-specific-version.md](kubeadm-install-specific-version.md)
+
+
 The above command installs additional packages, which are:
 * cri-tools  - Command line utility to interact with container runtime, such as docker)
 * containernetworking-plugins (formerly *kubernetes-cni*) - Binary files to provision container networking. The files are installed in `/opt/cni/bin` or `/usr/libexec/cni` depending on the version of Fedora you are using.
@@ -511,6 +514,7 @@ kubeadm init  \
   --ignore-preflight-errors="SystemVerification"
 ```
 
+**Note:** If you want a particular version of Kubernetes to be installed, you have to use additional switch: `--kubernetes-version string` with the `kubeadm init` command. Refer to: [kubeadm-install-specific-version.md](kubeadm-install-specific-version.md)
 
 ```
 [root@kubeadm-node1 ~]# kubeadm init  \

@@ -1,9 +1,8 @@
 # KubeAdm based kubernetes cluster
 
-**Note:** This document is updated to use Fedora 33. 
+**Note:** This document is updated to use Fedora 34. 
 
 Reference documentation: [https://kubernetes.io/docs/setup/independent/install-kubeadm/](https://kubernetes.io/docs/setup/independent/install-kubeadm/)
-
 
 Kubeadm helps you setup/bootstrap a minimum viable/usable Kubernetes cluster that just works. Kubeadm also supports cluster expansion, upgrades, downgrade, and managing bootstrap tokens, which are extra features, if you are comparing it with minikube.
 
@@ -44,8 +43,8 @@ In this guide, I will setup a single node kubernetes cluster using **kubeadm** a
 * **CPU:** Minimum 2 CPU for master node; worker nodes can live with single core CPUs
 * **Disk:** 4 GB for host OS + 20 GB for storing container images. (no swap)
 * **Network - Infrastructure:** A functional virtual/physical network with some usable IP addresses (can be public or private) . This can be on any cloud provider as well. You are free to use any network / ip scheme for yourself. In this guide, it will be `10.240.0.0/24`
-* **Network - Pod network:** A network IP range completely separate from other two networks, with subnet mask of `/16` or smaller (e.g. `/12`). This network will be subdivided into subnets later. In this guide it will be `10.200.0.0/16` . Please note that kubeadm does not support kubenet, so we need to use one of the CNI add-ons - such as flannel. By default Flannel sets up a pod network `10.244.0.0/16`, which means that we need to pass this pod network to `kubeadm init` (further below); or, modify the flannel configuration with the pod network of our own choice - before actually applying it blindly. :)
-* **Network - Service network:** A network IP range completely separate from other two networks, used by the services. This will be considered a completely virtual network. The default service network configured by kubeadm is `10.96.0.0/12`. In this guide, it will be `10.32.0.0/16`.
+* **Network - Pod network (pod-network-cidr):** A network IP range completely separate from other two networks, with subnet mask of `/16` or smaller (e.g. `/12`). This network will be subdivided into subnets later. In this guide it will be `10.200.0.0/16` . Please note that kubeadm does not support kubenet, so we need to use one of the CNI add-ons - such as flannel. By default Flannel sets up a pod network `10.244.0.0/16`, which means that we need to pass this pod network to `kubeadm init` (further below); or, modify the flannel configuration with the pod network of our own choice - before actually applying it blindly. :)
+* **Network - Service network (service-cidr):** A network IP range completely separate from other two networks, used by the services. This will be considered a completely virtual network. The default service network configured by kubeadm is `10.96.0.0/12`. In this guide, it will be `10.32.0.0/16`.
 * **Firewall:** Disable Firewall (including removing the firewalld package), or open the following ports on each type of node, after the OS installation is complete. 
 * **Firewall/ports - Master:** Incoming open (22, 6443, 10250, 10251, 10252, 2379, 2380)
 * **Firewall/ports - Worker:** Incoming open (22, 10250, 30000-32767)
@@ -55,6 +54,8 @@ In this guide, I will setup a single node kubernetes cluster using **kubeadm** a
 * Should have some sort of DNS for infrastructure network.
 
 ## OS setup:
+
+**Note:** Almost all commands in this document are run as user **"root"** while *logged in* as "root" - which eliminates the need to add the word "sudo" in front of each command. Therefore, I won't use "sudo".  
 
 ```
 [root@kworkhorse lib]# cat /etc/hosts
@@ -67,13 +68,17 @@ In this guide, I will setup a single node kubernetes cluster using **kubeadm** a
 ```
 
 ```
-sudo yum -y remove firewalld
+yum -y remove firewalld
 
-sudo yum -y install ebtables iproute-tc
+yum -y install ebtables iproute-tc NetworkManager-tui
 ```
 
 ```
-cat <<EOF > /etc/modules-load.d/k8s.conf
+sed -i 's/^SELINUX=enforcing$/SELINUX=disabled/' /etc/selinux/config
+```
+
+```
+cat > /etc/modules-load.d/k8s.conf <<EOF
 br_netfilter
 EOF
 ```
@@ -81,7 +86,7 @@ EOF
 
 Enable the sysctl setting `net.bridge.bridge-nf-call-iptables`
 ```
-cat <<EOF >  /etc/sysctl.d/k8s.conf
+cat > /etc/sysctl.d/k8s.conf <<EOF
 net.bridge.bridge-nf-call-ip6tables = 1
 net.bridge.bridge-nf-call-iptables = 1
 EOF
@@ -91,7 +96,7 @@ sysctl --system
 
 Increase the number of open files in `limits.conf`:
 ```
-cat <<EOF >>  /etc/security/limits.conf
+cat >> /etc/security/limits.d/k8s.conf <<EOF
 *       soft    nofile  16000
 *       hard    nofile  32000
 EOF
@@ -305,7 +310,7 @@ Jan 21 09:57:20 kubeadm-node1 systemd[1]: Finished Create swap on /dev/zram0.
 
 The default configuration file for zram is `/usr/lib/systemd/zram-generator.conf` . 
 
-To disable zram, uninstall `zram-generator-defaults` and `zram-generator` packages. Merely stopping/disabling the `swap-create@zram0.service` - and then rebooting - **will not work**.
+To disable zram, uninstall `zram-generator-defaults` and `zram-generator` packages. Merely stopping/disabling the `swap-create@zram0.service` - and then rebooting **will not work**.
 
 
 ```
@@ -365,12 +370,9 @@ Swap:             0           0           0
 ```
 
 
-
-
-
 ### Install container runtime (Docker):
 Reference: [https://kubernetes.io/docs/setup/cri/](https://kubernetes.io/docs/setup/cri/)
-You can select other runtimes too, such as Rocket (rkt). I will use Docker.
+You can select other runtimes too, such as **Rocket (rkt)**. I will use **Docker**.
 
 **Note:** DO NOT install docker from default Fedora/CentOS repository, that is a very old version of Docker.
 
@@ -381,15 +383,14 @@ yum config-manager \
     https://download.docker.com/linux/fedora/docker-ce.repo
 ```
 
-
 ```
 yum -y install docker-ce
 ```
 
 ```
-sudo systemctl enable docker
-sudo systemctl start docker
-sudo systemctl status docker
+systemctl enable docker
+systemctl start docker
+systemctl status docker
 ```
 
 ### Install kubeadm, kubelet and kubectl:
@@ -402,7 +403,7 @@ On each node, install:
 All of the above three pieces of software are available from kubernetes's yum repository. So first, set that up:
 
 ```
-cat <<EOF > /etc/yum.repos.d/kubernetes.repo
+cat > /etc/yum.repos.d/kubernetes.repo <<EOF
 [kubernetes]
 name=Kubernetes
 baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-x86_64
@@ -412,10 +413,6 @@ repo_gpgcheck=1
 gpgkey=https://packages.cloud.google.com/yum/doc/yum-key.gpg https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
 exclude=kube*
 EOF
-```
-
-```
-sudo sed -i 's/^SELINUX=enforcing$/SELINUX=disabled/' /etc/selinux/config
 ```
 
 ```
@@ -438,136 +435,200 @@ The above command installs additional packages, which are:
 * libnetfilter_queue - Netfilter queue userspace library
 
 
-**Note:** If you want to install a specific version of Kubernetes in your cluster - say `1.19.7` -  then you need a matching version of **kubelet** (and less important) matching version of **`kubeadm`** and **`kubeadm`**. How to do it is shown below. Then, *"how to install a specific version of Kubernetes?"* is  is demonstrated later.
- 
+**Note:** If you want to install a specific version of Kubernetes in your cluster - say `1.21.6-0` -  then you need a matching version of **kubelet**, matching version of **`kubeadm`** and **`kubectl`**  (less important) . A use-case for this is a lab/test environment, where you want to learn how to upgrade a kubernetes cluster from an older version to a newer version. 
+
 
 ```
 yum list kubelet kubeadm kubectl --disableexcludes=kubernetes
 ```
 
+OR
 
 ```
-[root@kubeadm-test ~]# yum list kubelet kubeadm kubectl --disableexcludes=kubernetes --showduplicates
+yum list kubelet kubeadm kubectl --disableexcludes=kubernetes --showduplicates
+```
+
+
+```
+[root@kubeadm-node1 ~]# yum list kubelet kubeadm kubectl --disableexcludes=kubernetes --showduplicates
 . . . 
 
-kubelet.x86_64                                                   1.19.3-0                                                     kubernetes
-kubelet.x86_64                                                   1.19.4-0                                                     kubernetes
-kubelet.x86_64                                                   1.19.5-0                                                     kubernetes
-kubelet.x86_64                                                   1.19.6-0                                                     kubernetes
-kubelet.x86_64                                                   1.19.7-0                                                     kubernetes
-kubelet.x86_64                                                   1.20.0-0                                                     kubernetes
-kubelet.x86_64                                                   1.20.1-0                                                     kubernetes
-kubelet.x86_64                                                   1.20.2-0                                                     kubernetes
-[root@kubeadm-test ~]# 
+kubelet.x86_64                                                   1.20.5-0                                                     kubernetes
+kubelet.x86_64                                                   1.20.6-0                                                     kubernetes
+kubelet.x86_64                                                   1.20.7-0                                                     kubernetes
+kubelet.x86_64                                                   1.20.8-0                                                     kubernetes
+kubelet.x86_64                                                   1.20.9-0                                                     kubernetes
+kubelet.x86_64                                                   1.20.10-0                                                    kubernetes
+kubelet.x86_64                                                   1.20.11-0                                                    kubernetes
+kubelet.x86_64                                                   1.20.12-0                                                    kubernetes
+kubelet.x86_64                                                   1.21.0-0                                                     kubernetes
+kubelet.x86_64                                                   1.21.1-0                                                     kubernetes
+kubelet.x86_64                                                   1.21.2-0                                                     kubernetes
+kubelet.x86_64                                                   1.21.3-0                                                     kubernetes
+kubelet.x86_64                                                   1.21.4-0                                                     kubernetes
+kubelet.x86_64                                                   1.21.5-0                                                     kubernetes
+kubelet.x86_64                                                   1.21.6-0                                                     kubernetes
+kubelet.x86_64                                                   1.22.0-0                                                     kubernetes
+kubelet.x86_64                                                   1.22.1-0                                                     kubernetes
+kubelet.x86_64                                                   1.22.2-0                                                     kubernetes
+kubelet.x86_64                                                   1.22.3-0                                                     kubernetes
+[root@kubeadm-node1 ~]# 
 ```
 
 ```
-[root@kubeadm-test ~]# yum list kubelet-1.19.7-0 kubeadm-1.19.7-0 kubectl-1.19.7-0 --disableexcludes=kubernetes
+[root@kubeadm-node1 ~]# yum list kubelet-1.21.6-0 kubeadm-1.21.6-0 kubectl-1.21.6-0 --disableexcludes=kubernetes
 Last metadata expiration check: 0:22:41 ago on Sat 06 Feb 2021 08:28:03 PM CET.
 Available Packages
-kubeadm.x86_64                                                    1.19.7-0                                                    kubernetes
-kubectl.x86_64                                                    1.19.7-0                                                    kubernetes
-kubelet.x86_64                                                    1.19.7-0                                                    kubernetes
-[root@kubeadm-test ~]# 
+kubeadm.x86_64                                                    1.21.6-0                                                    kubernetes
+kubectl.x86_64                                                    1.21.6-0                                                    kubernetes
+kubelet.x86_64                                                    1.21.6-0                                                    kubernetes
+[root@kubeadm-node1 ~]# 
 ```
 
 
-Install version `1.19.7-0` of these three components:
-
+To install latest version of these three components - irrespective of what version it is - use this:
 
 ```
 yum -y install --disableexcludes=kubernetes \
-  kubelet-1.19.7-0 \
-  kubeadm-1.19.7-0 \
-  kubectl-1.19.7-0
+  kubelet \
+  kubeadm \
+  kubectl
+```  
+
+
+To install specific version `1.21.6-0` of these three components, use this:
+
+```
+yum -y install --disableexcludes=kubernetes \
+  kubelet-1.21.6-0 \
+  kubeadm-1.21.6-0 \
+  kubectl-1.21.6-0
 ```  
 
 
 ```
-[root@kubeadm-test ~]# yum -y install --disableexcludes=kubernetes \
->   kubelet-1.19.7-0 \
->   kubeadm-1.19.7-0 \
->   kubectl-1.19.7-0
-Last metadata expiration check: 0:23:49 ago on Sat 06 Feb 2021 08:28:03 PM CET.
+[root@kubeadm-node1 ~]# yum -y install --disableexcludes=kubernetes \
+>   kubelet-1.21.6-0 \
+>   kubeadm-1.21.6-0 \
+>   kubectl-1.21.6-0
+Last metadata expiration check: 0:23:49 ago on Thu 28 Oct 2021 10:14:14 AM CEST.
 Dependencies resolved.
 ========================================================================================================================================
  Package                                      Architecture            Version                         Repository                   Size
 ========================================================================================================================================
 Installing:
- kubeadm                                      x86_64                  1.19.7-0                        kubernetes                  8.3 M
- kubectl                                      x86_64                  1.19.7-0                        kubernetes                  9.0 M
- kubelet                                      x86_64                  1.19.7-0                        kubernetes                   20 M
+ kubeadm                                      x86_64                  1.21.6-0                        kubernetes                  9.1 M
+ kubectl                                      x86_64                  1.21.6-0                        kubernetes                  9.6 M
+ kubelet                                      x86_64                  1.21.6-0                        kubernetes                   20 M
 Installing dependencies:
- conntrack-tools                              x86_64                  1.4.5-6.fc33                    fedora                      207 k
- containernetworking-plugins                  x86_64                  0.9.0-1.fc33                    updates                     9.3 M
- cri-tools                                    x86_64                  1.13.0-0                        kubernetes                  5.1 M
- libnetfilter_cthelper                        x86_64                  1.0.0-18.fc33                   fedora                       22 k
- libnetfilter_cttimeout                       x86_64                  1.0.0-16.fc33                   fedora                       22 k
- libnetfilter_queue                           x86_64                  1.0.2-16.fc33                   fedora                       27 k
- socat                                        x86_64                  1.7.4.1-1.fc33                  updates                     307 k
+ conntrack-tools                              x86_64                  1.4.5-7.fc34                    fedora                      206 k
+ containernetworking-plugins                  x86_64                  1.0.1-1.fc34                    updates                     8.7 M
+ cri-tools                                    x86_64                  1.19.0-0                        kubernetes                  5.7 M
+ libnetfilter_cthelper                        x86_64                  1.0.0-19.fc34                   fedora                       22 k
+ libnetfilter_cttimeout                       x86_64                  1.0.0-17.fc34                   fedora                       23 k
+ libnetfilter_queue                           x86_64                  1.0.2-17.fc34                   fedora                       27 k
+ socat                                        x86_64                  1.7.4.1-2.fc34                  fedora                      305 k
 
 Transaction Summary
 ========================================================================================================================================
 Install  10 Packages
 
-Total download size: 52 M
-Installed size: 266 M
+Total download size: 54 M
+Installed size: 285 M
 Downloading Packages:
-(1/10): socat-1.7.4.1-1.fc33.x86_64.rpm                                                                 742 kB/s | 307 kB     00:00    
-(2/10): conntrack-tools-1.4.5-6.fc33.x86_64.rpm                                                         397 kB/s | 207 kB     00:00    
-(3/10): libnetfilter_cttimeout-1.0.0-16.fc33.x86_64.rpm                                                 218 kB/s |  22 kB     00:00    
-(4/10): libnetfilter_cthelper-1.0.0-18.fc33.x86_64.rpm                                                  105 kB/s |  22 kB     00:00    
-(5/10): libnetfilter_queue-1.0.2-16.fc33.x86_64.rpm                                                     303 kB/s |  27 kB     00:00    
-(6/10): 14bfe6e75a9efc8eca3f638eb22c7e2ce759c67f95b43b16fae4ebabde1549f3-cri-tools-1.13.0-0.x86_64.rpm  1.7 MB/s | 5.1 MB     00:02    
-(7/10): containernetworking-plugins-0.9.0-1.fc33.x86_64.rpm                                             2.5 MB/s | 9.3 MB     00:03    
-(8/10): 5d5cf3bfda5f20ae144562586823529247b8b7292c5003182318451418904d3e-kubeadm-1.19.7-0.x86_64.rpm    1.7 MB/s | 8.3 MB     00:05    
-(9/10): 67eef704a2de59c72b6cc2cc278c831a195e818a58cfd39dc44a2164efd8fc81-kubectl-1.19.7-0.x86_64.rpm    2.1 MB/s | 9.0 MB     00:04    
-(10/10): 55d54ddf43404e0eb64741059220d13d4f139319f9a2065b8660af83fd48ec8e-kubelet-1.19.7-0.x86_64.rpm   2.9 MB/s |  20 MB     00:06    
+(1/10): libnetfilter_cthelper-1.0.0-19.fc34.x86_64.rpm                                                   86 kB/s |  22 kB     00:00    
+(2/10): libnetfilter_cttimeout-1.0.0-17.fc34.x86_64.rpm                                                  84 kB/s |  23 kB     00:00    
+(3/10): libnetfilter_queue-1.0.2-17.fc34.x86_64.rpm                                                     414 kB/s |  27 kB     00:00    
+(4/10): conntrack-tools-1.4.5-7.fc34.x86_64.rpm                                                         503 kB/s | 206 kB     00:00    
+(5/10): socat-1.7.4.1-2.fc34.x86_64.rpm                                                                 1.5 MB/s | 305 kB     00:00    
+(6/10): 67ffa375b03cea72703fe446ff00963919e8fce913fbc4bb86f06d1475a6bdf9-cri-tools-1.19.0-0.x86_64.rpm  1.9 MB/s | 5.7 MB     00:03    
+(7/10): 0259ed831f717e860cea6f0abdcca90d84a64115fb6ca419652422add9146db9-kubeadm-1.21.6-0.x86_64.rpm    1.3 MB/s | 9.1 MB     00:06    
+(8/10): 50e4c5518390e21192259ae920f37e1440f7be96c0c25d7feaead8167668cd93-kubectl-1.21.6-0.x86_64.rpm    2.4 MB/s | 9.6 MB     00:04    
+(9/10): containernetworking-plugins-1.0.1-1.fc34.x86_64.rpm                                             1.2 MB/s | 8.7 MB     00:07    
+(10/10): 65b73de168120e7413c9f4f825fe1783152214ffb95db38b56f073d3e7ec160e-kubelet-1.21.6-0.x86_64.rpm   5.4 MB/s |  20 MB     00:03    
 ----------------------------------------------------------------------------------------------------------------------------------------
-Total                                                                                                   4.4 MB/s |  52 MB     00:11     
+Total                                                                                                   4.0 MB/s |  54 MB     00:13     
+Kubernetes                                                                                               21 kB/s | 3.4 kB     00:00    
+Importing GPG key 0x307EA071:
+ Userid     : "Rapture Automatic Signing Key (cloud-rapture-signing-key-2021-03-01-08_01_09.pub)"
+ Fingerprint: 7F92 E05B 3109 3BEF 5A3C 2D38 FEEA 9169 307E A071
+ From       : https://packages.cloud.google.com/yum/doc/yum-key.gpg
+Key imported successfully
+Importing GPG key 0x836F4BEB:
+ Userid     : "gLinux Rapture Automatic Signing Key (//depot/google3/production/borg/cloud-rapture/keys/cloud-rapture-pubkeys/cloud-rapture-signing-key-2020-12-03-16_08_05.pub) <glinux-team@google.com>"
+ Fingerprint: 59FE 0256 8272 69DC 8157 8F92 8B57 C5C2 836F 4BEB
+ From       : https://packages.cloud.google.com/yum/doc/yum-key.gpg
+Key imported successfully
+Kubernetes                                                                                              6.1 kB/s | 975  B     00:00    
+Importing GPG key 0x3E1BA8D5:
+ Userid     : "Google Cloud Packages RPM Signing Key <gc-team@google.com>"
+ Fingerprint: 3749 E1BA 95A8 6CE0 5454 6ED2 F09C 394C 3E1B A8D5
+ From       : https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+Key imported successfully
 Running transaction check
 Transaction check succeeded.
 Running transaction test
 Transaction test succeeded.
 Running transaction
   Preparing        :                                                                                                                1/1 
-  Installing       : containernetworking-plugins-0.9.0-1.fc33.x86_64                                                               1/10 
-  Installing       : kubectl-1.19.7-0.x86_64                                                                                       2/10 
-  Installing       : cri-tools-1.13.0-0.x86_64                                                                                     3/10 
-  Installing       : libnetfilter_queue-1.0.2-16.fc33.x86_64                                                                       4/10 
-  Installing       : libnetfilter_cttimeout-1.0.0-16.fc33.x86_64                                                                   5/10 
-  Installing       : libnetfilter_cthelper-1.0.0-18.fc33.x86_64                                                                    6/10 
-  Installing       : conntrack-tools-1.4.5-6.fc33.x86_64                                                                           7/10 
-  Running scriptlet: conntrack-tools-1.4.5-6.fc33.x86_64                                                                           7/10 
-  Installing       : socat-1.7.4.1-1.fc33.x86_64                                                                                   8/10 
-  Installing       : kubelet-1.19.7-0.x86_64                                                                                       9/10 
-  Installing       : kubeadm-1.19.7-0.x86_64                                                                                      10/10 
-  Running scriptlet: kubeadm-1.19.7-0.x86_64                                                                                      10/10 
-  Verifying        : containernetworking-plugins-0.9.0-1.fc33.x86_64                                                               1/10 
-  Verifying        : socat-1.7.4.1-1.fc33.x86_64                                                                                   2/10 
-  Verifying        : conntrack-tools-1.4.5-6.fc33.x86_64                                                                           3/10 
-  Verifying        : libnetfilter_cthelper-1.0.0-18.fc33.x86_64                                                                    4/10 
-  Verifying        : libnetfilter_cttimeout-1.0.0-16.fc33.x86_64                                                                   5/10 
-  Verifying        : libnetfilter_queue-1.0.2-16.fc33.x86_64                                                                       6/10 
-  Verifying        : cri-tools-1.13.0-0.x86_64                                                                                     7/10 
-  Verifying        : kubeadm-1.19.7-0.x86_64                                                                                       8/10 
-  Verifying        : kubectl-1.19.7-0.x86_64                                                                                       9/10 
-  Verifying        : kubelet-1.19.7-0.x86_64                                                                                      10/10 
+  Installing       : containernetworking-plugins-1.0.1-1.fc34.x86_64                                                               1/10 
+  Installing       : kubectl-1.21.6-0.x86_64                                                                                       2/10 
+  Installing       : cri-tools-1.19.0-0.x86_64                                                                                     3/10 
+  Installing       : socat-1.7.4.1-2.fc34.x86_64                                                                                   4/10 
+  Installing       : libnetfilter_queue-1.0.2-17.fc34.x86_64                                                                       5/10 
+  Installing       : libnetfilter_cttimeout-1.0.0-17.fc34.x86_64                                                                   6/10 
+  Installing       : libnetfilter_cthelper-1.0.0-19.fc34.x86_64                                                                    7/10 
+  Installing       : conntrack-tools-1.4.5-7.fc34.x86_64                                                                           8/10 
+  Running scriptlet: conntrack-tools-1.4.5-7.fc34.x86_64                                                                           8/10 
+  Installing       : kubelet-1.21.6-0.x86_64                                                                                       9/10 
+  Installing       : kubeadm-1.21.6-0.x86_64                                                                                      10/10 
+  Running scriptlet: kubeadm-1.21.6-0.x86_64                                                                                      10/10 
+  Verifying        : conntrack-tools-1.4.5-7.fc34.x86_64                                                                           1/10 
+  Verifying        : libnetfilter_cthelper-1.0.0-19.fc34.x86_64                                                                    2/10 
+  Verifying        : libnetfilter_cttimeout-1.0.0-17.fc34.x86_64                                                                   3/10 
+  Verifying        : libnetfilter_queue-1.0.2-17.fc34.x86_64                                                                       4/10 
+  Verifying        : socat-1.7.4.1-2.fc34.x86_64                                                                                   5/10 
+  Verifying        : containernetworking-plugins-1.0.1-1.fc34.x86_64                                                               6/10 
+  Verifying        : cri-tools-1.19.0-0.x86_64                                                                                     7/10 
+  Verifying        : kubeadm-1.21.6-0.x86_64                                                                                       8/10 
+  Verifying        : kubectl-1.21.6-0.x86_64                                                                                       9/10 
+  Verifying        : kubelet-1.21.6-0.x86_64                                                                                      10/10 
 
 Installed:
-  conntrack-tools-1.4.5-6.fc33.x86_64         containernetworking-plugins-0.9.0-1.fc33.x86_64  cri-tools-1.13.0-0.x86_64               
-  kubeadm-1.19.7-0.x86_64                     kubectl-1.19.7-0.x86_64                          kubelet-1.19.7-0.x86_64                 
-  libnetfilter_cthelper-1.0.0-18.fc33.x86_64  libnetfilter_cttimeout-1.0.0-16.fc33.x86_64      libnetfilter_queue-1.0.2-16.fc33.x86_64 
-  socat-1.7.4.1-1.fc33.x86_64                
+  conntrack-tools-1.4.5-7.fc34.x86_64         containernetworking-plugins-1.0.1-1.fc34.x86_64  cri-tools-1.19.0-0.x86_64               
+  kubeadm-1.21.6-0.x86_64                     kubectl-1.21.6-0.x86_64                          kubelet-1.21.6-0.x86_64                 
+  libnetfilter_cthelper-1.0.0-19.fc34.x86_64  libnetfilter_cttimeout-1.0.0-17.fc34.x86_64      libnetfilter_queue-1.0.2-17.fc34.x86_64 
+  socat-1.7.4.1-2.fc34.x86_64                
 
 Complete!
-[root@kubeadm-test ~]#
+
+[root@kubeadm-node1 ~]#
 ```
 
 
 By this time, `kubeadm` is only *installed* - and is not *running*. 
 
-**Note:** kubelet is now set to start. Kubelet will continuously try to start and will fail (crash-loop), because it will wait for kubeadm to tell it what to do. This *"crash-loop"* is expected and normal. After you initialize your master (using kubeadm), the kubelet will run normally.
+```
+[root@kubeadm-node1 ~]# systemctl status kubelet
+○ kubelet.service - kubelet: The Kubernetes Node Agent
+     Loaded: loaded (/usr/lib/systemd/system/kubelet.service; disabled; vendor preset: disabled)
+    Drop-In: /usr/lib/systemd/system/kubelet.service.d
+             └─10-kubeadm.conf
+     Active: inactive (dead)
+       Docs: https://kubernetes.io/docs/
+[root@kubeadm-node1 ~]# 
+```
+
+### Activate/enable kubelet to boot at startup:
+Since `kubelet` is required to run on all "master" and "worker" nodes, we enable it now. 
+```
+[root@kubeadm-node1 ~]# systemctl enable kubelet
+Created symlink /etc/systemd/system/multi-user.target.wants/kubelet.service → /usr/lib/systemd/system/kubelet.service.
+
+[root@kubeadm-node1 ~]# systemctl start kubelet
+```
+
+**Note:** kubelet is now set to start. Kubelet will continuously try to start and will fail (crash-loop), because it will wait for kubeadm to tell it what to do. This *"crash-loop"* is expected and normal. After you initialize your master (using kubeadm), the kubelet will run normally. Later, once you join the worker nodes to master, the `kubelet` process on worker nodes will also stop doing the *"crash-loop"*.
 
 
 ```
@@ -576,29 +637,42 @@ By this time, `kubeadm` is only *installed* - and is not *running*.
      Loaded: loaded (/usr/lib/systemd/system/kubelet.service; enabled; vendor preset: disabled)
     Drop-In: /usr/lib/systemd/system/kubelet.service.d
              └─10-kubeadm.conf
-     Active: activating (auto-restart) (Result: exit-code) since Fri 2021-01-22 09:27:01 CET; 7s ago
+     Active: activating (auto-restart) (Result: exit-code) since Thu 2021-10-28 10:42:56 CEST; 3s ago
        Docs: https://kubernetes.io/docs/
-    Process: 26579 ExecStart=/usr/bin/kubelet $KUBELET_KUBECONFIG_ARGS $KUBELET_CONFIG_ARGS $KUBELET_KUBEADM_ARGS $KUBELET_EXTRA_ARGS (>
-   Main PID: 26579 (code=exited, status=255/EXCEPTION)
-        CPU: 83ms
+    Process: 43415 ExecStart=/usr/bin/kubelet $KUBELET_KUBECONFIG_ARGS $KUBELET_CONFIG_ARGS $KUBELET_KUBEADM_ARGS $KUBELET_EXTRA_ARGS (>
+   Main PID: 43415 (code=exited, status=1/FAILURE)
+        CPU: 103ms
 
-Jan 21 09:27:01 kubeadm-node1 systemd[1]: kubelet.service: Main process exited, code=exited, status=255/EXCEPTION
-Jan 21 09:27:01 kubeadm-node1 systemd[1]: kubelet.service: Failed with result 'exit-code'.
+Oct 28 10:42:56 kubeadm-node1.example.com systemd[1]: kubelet.service: Main process exited, code=exited, status=1/FAILURE
+Oct 28 10:42:56 kubeadm-node1.example.com systemd[1]: kubelet.service: Failed with result 'exit-code'.
+[root@kubeadm-node1 ~]#
 ```
 
+## About flannel and required network plugins:
+On newer versions of Fedora (e.g. 33+), the CNI plugins are installed in `/usr/libexec/cni` instead of `/opt/cni/bin`. However, Flannel  - installed later in this document - still expects them in `/opt/cni/bin/`. This seems to be hard-coded in flannel, so the only solution is to copy the CNI plugin files from  `/usr/libexec/cni/` to `/opt/cni/bin/` . If you do this step now, it will save you from some pain later. This is because in the next section we will clone this VM and make two more copies of it as two worker nodes. Doing the CNI plugin copy now will save you from doing it for each VM later.
+
+
+```
+mkdir -p /opt/cni/bin
+
+cp /usr/libexec/cni/*  /opt/cni/bin/
+```
+
+More detailed explanation for this will come later when we install Flannel.
+
 ------
 
-**Note:** If this was a VM you were setting up, and you want to clone the VM and make two more copies, now is the time to do that. The steps would be:
+## Pit stop!
+**Note:** If this was a VM you were setting up, and you want to clone the VM and make two more copies of this VM (as worker nodes), now is the time to do that. The steps would be:
 
 * Shutdown kubeadm-node1 
-* Make two clones of it's disk image. 
-* Create two more VMs out of those cloned images
-* Adjust hostname and network information in each node
-* Bring up all three nodes.
+* Make two clones of it 
+* Adjust hostname and network information (IP address) in each node
+* Bring up all three nodes
 
 ------
 
-## Run kubeadm on node1/master to setup the cluster:
+## Setup master node:
 
 SSH to the master node (node1) - as root, and run `kubeadm init` command. Also make a note of entire output of the `kubeadm init` command. This will be useful later. 
 
@@ -626,70 +700,68 @@ kubeadm init \
   --service-cidr "10.32.0.0/16"
 ```
 
+To initialize specific version of kubernetes, use extra switch `--kubernetes-version`:
+```
+kubeadm init \
+  --pod-network-cidr "10.200.0.0/16" \
+  --service-cidr "10.32.0.0/16" \
+  --kubernetes-version "v1.21.6"
+```
 
-**Note:** You can skip `--pod-network-cidr` and `--service-cidr` . The default for pod-network is nothing- actually depends on the CNI plugin you will be using; but if you plan to use flannel, **and** want to use flannels *default configuration*, then you must pass `--pod-network-cidr "10.244.0.0/16"` to the `kubeadm init` command . The default for `--service-cidr` is: `10.96.0.0/12`. 
+If you already installed a specific version of `kubeadm`, `kubelet` and `kubectl`, then specifying it here is not very important. Kubeadm will detect this and will setup kubernetes cluster with that specific version. 
+
+**Note:** You can skip `--pod-network-cidr` and `--service-cidr` . The default for pod-network is nothing - actually depends on the CNI plugin you will be using; but if you plan to use flannel, **and** want to use flannel's *default configuration*, then you must pass `--pod-network-cidr "10.244.0.0/16"` to the `kubeadm init` command . The default for `--service-cidr` is: `10.96.0.0/12`. 
 
 
-My docker version is `20.10.2` , which is not certified by kubeadm, so I have to use the `--ignore-preflight-errors="SystemVerification"` switch in the command below.
+If you docker version is unsupported/certified by `kubeadm`, you can use the `--ignore-preflight-errors="SystemVerification"` switch in the command below.
 
 
 ```
 kubeadm init  \
   --pod-network-cidr "10.200.0.0/16" \
   --service-cidr "10.32.0.0/16" \
-  --ignore-preflight-errors="SystemVerification"
-```
-
-
-Or, Install specific version of Kubernetes:
-```
-kubeadm init  \
-  --pod-network-cidr "10.200.0.0/16" \
-  --service-cidr "10.32.0.0/16" \
-  --kubernetes-version "v1.19.7" \
+  --kubernetes-version "v1.21.6" \
   --ignore-preflight-errors="SystemVerification"
 ```
 
 **Notes:** 
-* If you want a particular version of Kubernetes to be installed, you have to use additional switch: `--kubernetes-version string` with the `kubeadm init` command. (Shown next)
 * The `--kubernetes-version` switch expects a semantic version, and is different in *appearance* from it's `yum` counterpart, even though it looks the same. 
-* The exact (semantic) version of Kubernetes can be found from the URL: [https://github.com/kubernetes/kubernetes/tags](https://github.com/kubernetes/kubernetes/tags)
+* The exact (semantic) versions of Kubernetes can be found from the URL: [https://github.com/kubernetes/kubernetes/tags](https://github.com/kubernetes/kubernetes/tags)
 
 ```
 kubeadm init \
   --pod-network-cidr "10.200.0.0/16" \
   --service-cidr "10.32.0.0/16" \
-  --kubernetes-version "v1.19.7" \
+  --kubernetes-version "service-cidr" \
   --ignore-preflight-errors="SystemVerification"
 ```
 
-
-If you do not use `--kubernetes-version string`, then the **latest** version of Kubernetes will be installed:
+If you do not use `--kubernetes-version "<string>"`, then one of two things will happen:
+* If `kubeadm` itself is the latest version, then the **latest** version of Kubernetes will be installed.
+* If `kubeadm` itself is a specific version (e.g. **`1.21.6-0`**), then even though `kubeadm` will detect a newer (remote) version, it will still install/setup the corresponding version of kubernetes. In our example case, **version `v1.21.6`** of Kubernetes will be installed.
 
 ```
-[root@kubeadm-node1 ~]# kubeadm init  \
+[root@kubeadm-node1 ~]# kubeadm init \
   --pod-network-cidr "10.200.0.0/16" \
-  --service-cidr "10.32.0.0/16" \
-  --ignore-preflight-errors="SystemVerification"
-
-[init] Using Kubernetes version: v1.20.2
+  --service-cidr "10.32.0.0/16"
+I1028 11:34:21.490312    1005 version.go:254] remote version is much newer: v1.22.3; falling back to: stable-1.21
+[init] Using Kubernetes version: v1.21.6
 [preflight] Running pre-flight checks
-	[WARNING SystemVerification]: this Docker version is not on the list of validated versions: 20.10.2. Latest validated version: 19.03
 [preflight] Pulling images required for setting up a Kubernetes cluster
 [preflight] This might take a minute or two, depending on the speed of your internet connection
 [preflight] You can also perform this action in beforehand using 'kubeadm config images pull'
 [certs] Using certificateDir folder "/etc/kubernetes/pki"
 [certs] Generating "ca" certificate and key
 [certs] Generating "apiserver" certificate and key
-[certs] apiserver serving cert is signed for DNS names [kubeadm-node1 kubernetes kubernetes.default kubernetes.default.svc kubernetes.default.svc.cluster.local] and IPs [10.32.0.1 10.240.0.31]
+[certs] apiserver serving cert is signed for DNS names [kubeadm-node1.example.com kubernetes kubernetes.default kubernetes.default.svc kubernetes.default.svc.cluster.local] and IPs [10.32.0.1 10.240.0.31]
 [certs] Generating "apiserver-kubelet-client" certificate and key
 [certs] Generating "front-proxy-ca" certificate and key
 [certs] Generating "front-proxy-client" certificate and key
 [certs] Generating "etcd/ca" certificate and key
 [certs] Generating "etcd/server" certificate and key
-[certs] etcd/server serving cert is signed for DNS names [kubeadm-node1 localhost] and IPs [10.240.0.31 127.0.0.1 ::1]
+[certs] etcd/server serving cert is signed for DNS names [kubeadm-node1.example.com localhost] and IPs [10.240.0.31 127.0.0.1 ::1]
 [certs] Generating "etcd/peer" certificate and key
-[certs] etcd/peer serving cert is signed for DNS names [kubeadm-node1 localhost] and IPs [10.240.0.31 127.0.0.1 ::1]
+[certs] etcd/peer serving cert is signed for DNS names [kubeadm-node1.example.com localhost] and IPs [10.240.0.31 127.0.0.1 ::1]
 [certs] Generating "etcd/healthcheck-client" certificate and key
 [certs] Generating "apiserver-etcd-client" certificate and key
 [certs] Generating "sa" key and public key
@@ -707,13 +779,13 @@ If you do not use `--kubernetes-version string`, then the **latest** version of 
 [control-plane] Creating static Pod manifest for "kube-scheduler"
 [etcd] Creating static Pod manifest for local etcd in "/etc/kubernetes/manifests"
 [wait-control-plane] Waiting for the kubelet to boot up the control plane as static Pods from directory "/etc/kubernetes/manifests". This can take up to 4m0s
-[apiclient] All control plane components are healthy after 15.002731 seconds
+[apiclient] All control plane components are healthy after 16.503749 seconds
 [upload-config] Storing the configuration used in ConfigMap "kubeadm-config" in the "kube-system" Namespace
-[kubelet] Creating a ConfigMap "kubelet-config-1.20" in namespace kube-system with the configuration for the kubelets in the cluster
+[kubelet] Creating a ConfigMap "kubelet-config-1.21" in namespace kube-system with the configuration for the kubelets in the cluster
 [upload-certs] Skipping phase. Please see --upload-certs
-[mark-control-plane] Marking the node kubeadm-node1 as control-plane by adding the labels "node-role.kubernetes.io/master=''" and "node-role.kubernetes.io/control-plane='' (deprecated)"
-[mark-control-plane] Marking the node kubeadm-node1 as control-plane by adding the taints [node-role.kubernetes.io/master:NoSchedule]
-[bootstrap-token] Using token: axzi13.323q1c2oqtzwpnvt
+[mark-control-plane] Marking the node kubeadm-node1.example.com as control-plane by adding the labels: [node-role.kubernetes.io/master(deprecated) node-role.kubernetes.io/control-plane node.kubernetes.io/exclude-from-external-load-balancers]
+[mark-control-plane] Marking the node kubeadm-node1.example.com as control-plane by adding the taints [node-role.kubernetes.io/master:NoSchedule]
+[bootstrap-token] Using token: w1nvi9.l4c7jfjw69pp6zl4
 [bootstrap-token] Configuring bootstrap tokens, cluster-info ConfigMap, RBAC Roles
 [bootstrap-token] configured RBAC rules to allow Node Bootstrap tokens to get nodes
 [bootstrap-token] configured RBAC rules to allow Node Bootstrap tokens to post CSRs in order for nodes to get long term certificate credentials
@@ -742,15 +814,15 @@ Run "kubectl apply -f [podnetwork].yaml" with one of the options listed at:
 
 Then you can join any number of worker nodes by running the following on each as root:
 
-kubeadm join 10.240.0.31:6443 --token axzi13.323q1c2oqtzwpnvt \
-    --discovery-token-ca-cert-hash sha256:b4938932a8d2eb82642a1d48b6ae828ef7fcccc3d249480ea8f814378a380e02 
-[root@kubeadm-node1 ~]# 
-
-
+kubeadm join 10.240.0.31:6443 --token w1nvi9.l4c7jfjw69pp6zl4 \
+	--discovery-token-ca-cert-hash sha256:394d169c4d594ad6110ce7c093fca65b49d598a058085dd9a36ca36037cfd09a 
+[root@kubeadm-node1 ~]#
 ```
 
+### Optional - Setup a normal user:
+This step is completely optional. You can operate this kubernetes cluster while logged in as `root` on the master node, or by using a normal user account on master node; or copy/import/merge the `/etc/kubernetes/admin.conf` from master node to `.kube/config` your main/local/work/home computer and use `kubectl` from that computer.
 
-Now we setup the user `student` to use kubectl. This is part of the instructions in the `kubeadmin init` output above.
+Setup a user `student` on master node to use kubectl, and use instructions from the output of `kubeadm init` command above. 
 
 ```
 [root@kubeadm-node1 ~]# su - student
@@ -771,7 +843,9 @@ Administrator. It usually boils down to these three things:
 [student@kubeadm-node1 ~]$ sudo chown $(id -u):$(id -g) $HOME/.kube/config
 ```
 
-Check if you can talk to the cluster/API server. (The output below is from an older version of kubernetes, and kept for record / comparison. See further below to see what happens when you check "componentstatuses" on the latest version (1.19+) of Kubernetes).
+### Check connectivity with your cluster:
+
+**Note:**  `kubectl get componentstatuses` does not work on kubernetes `1.19+`. The output below is from an older version of kubernetes, and kept for record / comparison. 
 
 ```
 [student@kubeadm-node1 ~]$ kubectl get componentstatuses
@@ -788,15 +862,23 @@ kubeadm-node1   NotReady   master   12m   v1.12.2
 [student@kubeadm-node1 ~]$ 
 ```
 
-At least the cluster's components are ok!
-
+OK, we have connectivity! 
 
 Since this is my personal test cluster, I can just skip the "regular user" step, and simply connect as `root` and use the cluster:
+
 ```
 export KUBECONFIG=/etc/kubernetes/admin.conf
 ```
+(and remember to add it to `~/.bashrc` and/or `~/.bash_profile`)
 
-**Note:** `kubectl get componentstatuses` does not work anymore in kubernetes 1.19+ . 
+OR
+
+```
+cp /etc/kubernetes/admin.conf /root/.kube/config
+```
+
+
+As mentioned above, `kubectl get componentstatuses` does not work anymore in kubernetes 1.19+ . That is why you see **"Unhealthy"** as "STATUS" for **"controller-manager"** and **"scheduler"**. In newer versions of Kubernetes, you should not bother with `get componentstatuses`.
 
 ```
 [root@kubeadm-node1 ~]# kubectl get componentstatuses
@@ -808,6 +890,7 @@ etcd-0               Healthy     {"health":"true"}
 [root@kubeadm-node1 ~]# 
 ```
 
+The master node below is "NotReady", which is normal/expected at this point. This is because CoreDNS is not running yet.
 ```
 [root@kubeadm-node1 ~]# kubectl get nodes
 NAME            STATUS     ROLES                  AGE   VERSION
@@ -816,55 +899,50 @@ kubeadm-node1   NotReady   control-plane,master   10m   v1.20.2
 ```
 
 
-CoreDNS is not running, because podnetwork is not enabled yet:
+CoreDNS is not running, because pod-network is not enabled yet:
 ```
 [root@kubeadm-node1 ~]# kubectl --namespace=kube-system get pods
-NAME                                    READY   STATUS    RESTARTS   AGE
-coredns-74ff55c5b-9nq69                 0/1     Pending   0          8m34s
-coredns-74ff55c5b-xdzxr                 0/1     Pending   0          8m34s
-etcd-kubeadm-node1                      1/1     Running   0          8m40s
-kube-apiserver-kubeadm-node1            1/1     Running   0          8m40s
-kube-controller-manager-kubeadm-node1   1/1     Running   0          8m40s
-kube-proxy-nn29f                        1/1     Running   0          8m34s
-kube-scheduler-kubeadm-node1            1/1     Running   0          8m40s
+NAME                                                READY   STATUS    RESTARTS   AGE
+coredns-558bd4d5db-k94vv                            0/1     Pending   0          45m
+coredns-558bd4d5db-pmp9z                            0/1     Pending   0          45m
+etcd-kubeadm-node1.example.com                      1/1     Running   0          45m
+kube-apiserver-kubeadm-node1.example.com            1/1     Running   0          45m
+kube-controller-manager-kubeadm-node1.example.com   1/1     Running   0          45m
+kube-proxy-sgb9d                                    1/1     Running   0          45m
+kube-scheduler-kubeadm-node1.example.com            1/1     Running   0          45m
 [root@kubeadm-node1 ~]# 
 ```
 
-Kubelet cannot find podnetwork yet:
+We can see that `kubelet` cannot find pod-network yet, because a CNI plugin is not yet installed/setup:
+
 ```
-[root@kubeadm-node1 ~]# systemctl status kubelet
+[root@kubeadm-node1 ~]# systemctl status kubelet --no-pager -l
 ● kubelet.service - kubelet: The Kubernetes Node Agent
      Loaded: loaded (/usr/lib/systemd/system/kubelet.service; enabled; vendor preset: disabled)
     Drop-In: /usr/lib/systemd/system/kubelet.service.d
              └─10-kubeadm.conf
-     Active: active (running) since Fri 2021-01-22 10:01:42 CET; 10h ago
+     Active: active (running) since Thu 2021-10-28 11:35:39 CEST; 52min ago
        Docs: https://kubernetes.io/docs/
-   Main PID: 3977 (kubelet)
-      Tasks: 16 (limit: 2323)
-     Memory: 49.1M
-        CPU: 3min 40.179s
+   Main PID: 2923 (kubelet)
+      Tasks: 15 (limit: 2316)
+     Memory: 43.6M
+        CPU: 1min 57.719s
      CGroup: /system.slice/kubelet.service
-             └─3977 /usr/bin/kubelet --bootstrap-kubeconfig=/etc/kubernetes/bootstrap-kubelet.conf --kubeconfig=/etc/kubernetes/kubelet>
+             └─2923 /usr/bin/kubelet --bootstrap-kubeconfig=/etc/kubernetes/bootstrap-kubelet.conf --kubeconfig=/etc/kubernetes/kubelet.conf --config=/var/lib/kubelet/config.yaml --network-plugin=cni --pod-infra-container-image=k8s.gcr.io/pause:3.4.1
 
-Jan 21 09:35:01 kubeadm-node1 kubelet[3977]: E0122 20:43:26.356668    3977 kubelet.go:2163] Container runtime network not ready: Network>
-Jan 21 09:35:02 kubeadm-node1 kubelet[3977]: W0122 20:43:27.513623    3977 cni.go:239] Unable to update cni config: no networks found in>
-Jan 21 09:35:05 kubeadm-node1 kubelet[3977]: E0122 20:43:31.372514    3977 kubelet.go:2163] Container runtime network not ready: Network>
-Jan 21 09:35:09 kubeadm-node1 kubelet[3977]: W0122 20:43:32.515160    3977 cni.go:239] Unable to update cni config: no networks found in>
-Jan 21 09:35:11 kubeadm-node1 kubelet[3977]: E0122 20:43:36.398434    3977 kubelet.go:2163] Container runtime network not ready: Network>
-Jan 21 09:35:15 kubeadm-node1 kubelet[3977]: W0122 20:43:37.516365    3977 cni.go:239] Unable to update cni config: no networks found in>
-Jan 21 09:35:20 kubeadm-node1 kubelet[3977]: E0122 20:43:41.426484    3977 kubelet.go:2163] Container runtime network not ready: Network>
-Jan 21 09:35:27 kubeadm-node1 kubelet[3977]: W0122 20:43:42.517187    3977 cni.go:239] Unable to update cni config: no networks found in>
-Jan 21 09:35:30 kubeadm-node1 kubelet[3977]: E0122 20:43:46.454019    3977 kubelet.go:2163] Container runtime network not ready: Network>
-Jan 21 09:35:35 kubeadm-node1 kubelet[3977]: W0122 20:43:47.517483    3977 cni.go:239] Unable to update cni config: no networks found in>
-lines 1-23/23 (END)
+Oct 28 12:27:41 kubeadm-node1.example.com kubelet[2923]: E1028 12:27:41.265038    2923 kubelet.go:2211] "Container runtime network not ready" networkReady="NetworkReady=false reason:NetworkPluginNotReady message:docker: network plugin is not ready: cni config uninitialized"
+
+Oct 28 12:27:46 kubeadm-node1.example.com kubelet[2923]: I1028 12:27:46.022458    2923 cni.go:204] "Error validating CNI config list" configList="{\n  \"name\": \"cbr0\",\n  \"cniVersion\": \"0.3.1\",\n  \"plugins\": [\n    {\n      \"type\": \"flannel\",\n      \"delegate\": {\n        \"hairpinMode\": true,\n        \"isDefaultGateway\": true\n      }\n    },\n    {\n      \"type\": \"portmap\",\n      \"capabilities\": {\n        \"portMappings\": true\n      }\n    }\n  ]\n}\n" err="[failed to find plugin \"portmap\" in path [/opt/cni/bin]]"
+
+Oct 28 12:27:46 kubeadm-node1.example.com kubelet[2923]: I1028 12:27:46.023621    2923 cni.go:239] "Unable to update cni config" err="no valid networks found in /etc/cni/net.d"
 ```
 
+------
 
+## Install pod network:
+At this time, if you check cluster health, you will see **Master** as **NotReady**. It is because a pod network is not yet deployed on the cluster. You must install a pod-network add-on so that your pods can communicate with each other. Use one of the network-addons listed in the Networking section at [https://kubernetes.io/docs/concepts/cluster-administration/addons/](https://kubernetes.io/docs/concepts/cluster-administration/addons/). Flannel is the easiest. Others can be used too.
 
-# Install pod network:
-At this time, if you check cluster health, you will see **Master** as **NotReady**. It is because a pod network is not yet deployed on the cluster. You must install a pod network add-on so that your pods can communicate with each other. Use one of the network addons listed in the Networking section at [https://kubernetes.io/docs/concepts/cluster-administration/addons/](https://kubernetes.io/docs/concepts/cluster-administration/addons/). Flannel is the easiest. Others can be used too.
-
-**Important:** The network must be deployed before any applications. Also, CoreDNS will not start up before a network is installed. kubeadm only supports Container Network Interface (CNI) based networks (and does not support kubenet).
+**Important:** The network must be deployed before any applications. Also, CoreDNS will not start up before a network is installed. `kubeadm` only supports Container Network Interface (CNI) based networks (and does not support `kubenet`).
 
 **Repeat: Kubeadm DOES NOT support kubenet** 
 
@@ -874,17 +952,17 @@ At this time, if you check cluster health, you will see **Master** as **NotReady
 
 ## Install flannel CNI plugin/addon:
 
-**Note:** Flannel is focused on networking. For network policy, other projects such as Calico can be used.
+Flannel is simple CNI plugin and is focused only on networking. For network policies, etc, you can use other projects such as Calico.
 
-**Note:** For flannel to work correctly, you must pass `--pod-network-cidr=10.244.0.0/16` to `kubeadm init` ; or modify the kube-flannel.yaml to use your own pod network before applying tha yaml with `kubectl`. 
+**Notes:** 
+* If you want to use default configuration for flannel - provided by flannel - then for flannel to work correctly, you must pass `--pod-network-cidr=10.244.0.0/16` to `kubeadm init`.
+* If you want to use a `pod-network-cidr` of your own choice - which we did in the beginning of this document, then you must first modify the `kube-flannel.yaml` file before using it, with the pod-network of your choice (`10.200.0.0/16`).
 
-Also, set `/proc/sys/net/bridge/bridge-nf-call-iptables` to `1` by running `sysctl net.bridge.bridge-nf-call-iptables=1` to pass bridged IPv4 traffic to iptables’ chains. This is a requirement for some CNI plugins to work. Setup this configuration in the `/etc/sysctl.conf` file to make this permanent.
+Also, set `/proc/sys/net/bridge/bridge-nf-call-iptables` to `1` by running `sysctl net.bridge.bridge-nf-call-iptables=1` to pass bridged IPv4 traffic to iptables’ chains. This is a requirement for some CNI plugins to work. Setup this configuration in the `/etc/sysctl.conf` file to make this permanent. (This is already done in the beginning of this document, during OS setup).
 
 Check [https://github.com/coreos/flannel/blob/master/Documentation/kubernetes.md](https://github.com/coreos/flannel/blob/master/Documentation/kubernetes.md) for more information about flannel.
 
-Download the flannel.yaml file and adjust the pod network with the one we chose (10.200.0.0/16) 
-
-
+Download the flannel.yaml file and adjust the pod network with the one we chose (`10.200.0.0/16`) 
 
 ```
 [root@kubeadm-node1 ~]# wget https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml
@@ -912,15 +990,19 @@ Saving to: ‘kube-flannel.yml’
 Now, apply this yaml file to the cluster, so the pod network could come up. Flannel is setup as a *daemon-set* and uses *host* networking of the node.
 
 ```
-[root@kubeadm-node1 ~]# kubectl apply -f kube-flannel.yml 
+[root@kubeadm-node1 ~]#  kubectl apply -f kube-flannel.yml
+Warning: policy/v1beta1 PodSecurityPolicy is deprecated in v1.21+, unavailable in v1.25+
 podsecuritypolicy.policy/psp.flannel.unprivileged created
 clusterrole.rbac.authorization.k8s.io/flannel created
 clusterrolebinding.rbac.authorization.k8s.io/flannel created
 serviceaccount/flannel created
 configmap/kube-flannel-cfg created
 daemonset.apps/kube-flannel-ds created
-[root@kubeadm-node1 ~]# 
+[root@kubeadm-node1 ~]#  
 ```
+
+
+Check node and pod status - which still show that they are not ready:
 
 ```
 [root@kubeadm-node1 ~]# kubectl get nodes
@@ -943,37 +1025,60 @@ kube-scheduler-kubeadm-node1            1/1     Running   1          11h
 [root@kubeadm-node1 ~]# 
 ```
 
-
+Check `kubelet` for problems:
 
 ```
-[root@kubeadm-node1 ~]#  systemctl status kubelet
+[root@kubeadm-node1 ~]# systemctl status kubelet --no-pager -l
 ● kubelet.service - kubelet: The Kubernetes Node Agent
      Loaded: loaded (/usr/lib/systemd/system/kubelet.service; enabled; vendor preset: disabled)
     Drop-In: /usr/lib/systemd/system/kubelet.service.d
              └─10-kubeadm.conf
-     Active: active (running) since Fri 2021-01-22 10:01:42 CET; 10h ago
+     Active: active (running) since Thu 2021-10-28 11:35:39 CEST; 52min ago
        Docs: https://kubernetes.io/docs/
-   Main PID: 3977 (kubelet)
-      Tasks: 16 (limit: 2323)
-     Memory: 51.2M
-        CPU: 4min 20.349s
+   Main PID: 2923 (kubelet)
+      Tasks: 15 (limit: 2316)
+     Memory: 43.6M
+        CPU: 1min 57.719s
      CGroup: /system.slice/kubelet.service
-             └─3977 /usr/bin/kubelet --bootstrap-kubeconfig=/etc/kubernetes/bootstrap-kubelet.conf --kubeconfig=/etc/kubernetes/kubelet>
+             └─2923 /usr/bin/kubelet --bootstrap-kubeconfig=/etc/kubernetes/bootstrap-kubelet.conf --kubeconfig=/etc/kubernetes/kubelet.conf --config=/var/lib/kubelet/config.yaml --network-plugin=cni --pod-infra-container-image=k8s.gcr.io/pause:3.4.1
 
-Jan 22 21:00:22 kubeadm-node1 kubelet[3977]:     {
-Jan 22 21:00:22 kubeadm-node1 kubelet[3977]:       "type": "portmap",
-Jan 22 21:00:22 kubeadm-node1 kubelet[3977]:       "capabilities": {
-Jan 22 21:00:22 kubeadm-node1 kubelet[3977]:         "portMappings": true
-Jan 22 21:00:22 kubeadm-node1 kubelet[3977]:       }
-Jan 22 21:00:22 kubeadm-node1 kubelet[3977]:     }
-Jan 22 21:00:22 kubeadm-node1 kubelet[3977]:   ]
-Jan 22 21:00:22 kubeadm-node1 kubelet[3977]: }
-Jan 22 21:00:22 kubeadm-node1 kubelet[3977]: : [failed to find plugin "flannel" in path [/opt/cni/bin] failed to find plugin "portmap" i>
-Jan 22 21:00:22 kubeadm-node1 kubelet[3977]: W0122 21:00:22.710114    3977 cni.go:239] Unable to update cni config: no valid networks fo>
-lines 1-23/23 (END)
+Oct 28 12:27:41 kubeadm-node1.example.com kubelet[2923]: E1028 12:27:41.265038    2923 kubelet.go:2211] "Container runtime network not ready" networkReady="NetworkReady=false reason:NetworkPluginNotReady message:docker: network plugin is not ready: cni config uninitialized"
+
+Oct 28 12:27:46 kubeadm-node1.example.com kubelet[2923]: I1028 12:27:46.022458    2923 cni.go:204] "Error validating CNI config list" configList="{\n  \"name\": \"cbr0\",\n  \"cniVersion\": \"0.3.1\",\n  \"plugins\": [\n    {\n      \"type\": \"flannel\",\n      \"delegate\": {\n        \"hairpinMode\": true,\n        \"isDefaultGateway\": true\n      }\n    },\n    {\n      \"type\": \"portmap\",\n      \"capabilities\": {\n        \"portMappings\": true\n      }\n    }\n  ]\n}\n" err="[failed to find plugin \"portmap\" in path [/opt/cni/bin]]"
+
+Oct 28 12:27:46 kubeadm-node1.example.com kubelet[2923]: I1028 12:27:46.023621    2923 cni.go:239] "Unable to update cni config" err="no valid networks found in /etc/cni/net.d"
 ```
 
-**Note:** On newer versions of Fedora (e.g. 33), the CNI plugins are installed in `/usr/libexec/cni` instead of `/opt/cni/bin`. However Flannel still expects them in `/opt/cni/bin/`. This seems to be hard-coded in flannel, so the only solution is to copy the CNI plugin files from  `/usr/libexec/cni/` to `/opt/cni/bin/`
+**Notice:** `err="[failed to find plugin \"portmap\" in path [/opt/cni/bin]]`
+
+
+**Note:** On newer versions of Fedora (e.g. 33+), the CNI plugins are installed in `/usr/libexec/cni` instead of `/opt/cni/bin`. However Flannel still expects them in `/opt/cni/bin/`. This seems to be hard-coded in flannel, so the only solution is to copy the CNI plugin files from  `/usr/libexec/cni/` to `/opt/cni/bin/` .
+
+**Note:** Do these steps on all nodes, otherwise they will remain in the "NotReady" state.
+
+```
+[root@kubeadm-node1 ~]# ls  -lh /usr/libexec/cni/
+total 60M
+-rwxr-xr-x. 1 root root 3.4M Sep  8 03:10 bandwidth
+-rwxr-xr-x. 1 root root 3.7M Sep  8 03:10 bridge
+-rwxr-xr-x. 1 root root 8.5M Sep  8 03:10 dhcp
+-rwxr-xr-x. 1 root root 3.9M Sep  8 03:10 firewall
+-rwxr-xr-x. 1 root root 3.4M Sep  8 03:10 host-device
+-rwxr-xr-x. 1 root root 2.8M Sep  8 03:10 host-local
+-rwxr-xr-x. 1 root root 3.5M Sep  8 03:10 ipvlan
+-rwxr-xr-x. 1 root root 2.9M Sep  8 03:10 loopback
+-rwxr-xr-x. 1 root root 3.6M Sep  8 03:10 macvlan
+-rwxr-xr-x. 1 root root 3.3M Sep  8 03:10 portmap
+-rwxr-xr-x. 1 root root 3.7M Sep  8 03:10 ptp
+-rwxr-xr-x. 1 root root 2.5M Sep  8 03:10 sample
+-rwxr-xr-x. 1 root root 3.1M Sep  8 03:10 sbr
+-rwxr-xr-x. 1 root root 2.5M Sep  8 03:10 static
+-rwxr-xr-x. 1 root root 3.1M Sep  8 03:10 tuning
+-rwxr-xr-x. 1 root root 3.5M Sep  8 03:10 vlan
+-rwxr-xr-x. 1 root root 3.1M Sep  8 03:10 vrf
+[root@kubeadm-node1 ~]# 
+```
+
 
 ```
 [root@kubeadm-node1 ~]# mkdir /opt/cni/bin -p
@@ -981,59 +1086,71 @@ lines 1-23/23 (END)
 [root@kubeadm-node1 ~]# cp /usr/libexec/cni/*  /opt/cni/bin/
 ```
 
-After few seconds, the node will become ready, and CoreDNS will also start.
+As soon as you copy the plugins, within few seconds, kubelet will detect flannel plugins, and will start flannel properly.
 
 ```
-[root@kubeadm-node1 ~]#  systemctl status kubelet
+[root@kubeadm-node1 ~]# systemctl status kubelet --no-pager -l
 ● kubelet.service - kubelet: The Kubernetes Node Agent
      Loaded: loaded (/usr/lib/systemd/system/kubelet.service; enabled; vendor preset: disabled)
     Drop-In: /usr/lib/systemd/system/kubelet.service.d
              └─10-kubeadm.conf
-     Active: active (running) since Fri 2021-01-22 10:01:42 CET; 11h ago
+     Active: active (running) since Thu 2021-10-28 11:35:39 CEST; 57min ago
        Docs: https://kubernetes.io/docs/
-   Main PID: 3977 (kubelet)
-      Tasks: 16 (limit: 2323)
-     Memory: 92.5M
-        CPU: 5min 57.856s
+   Main PID: 2923 (kubelet)
+      Tasks: 15 (limit: 2316)
+     Memory: 58.2M
+        CPU: 2min 11.600s
      CGroup: /system.slice/kubelet.service
-             └─3977 /usr/bin/kubelet --bootstrap-kubeconfig=/etc/kubernetes/bootstrap-kubelet.conf --kubeconfig=/etc/kubernetes/kubelet>
+             └─2923 /usr/bin/kubelet --bootstrap-kubeconfig=/etc/kubernetes/bootstrap-kubelet.conf --kubeconfig=/etc/kubernetes/kubelet.conf --config=/var/lib/kubelet/config.yaml --network-plugin=cni --pod-infra-container-image=k8s.gcr.io/pause:3.4.1
 
-Jan 22 21:24:43 kubeadm-node1 kubelet[3977]: : [failed to find plugin "flannel" in path [/opt/cni/bin] failed to find plugin "portmap" i>
-Jan 22 21:24:43 kubeadm-node1 kubelet[3977]: W0122 21:24:43.532875    3977 cni.go:239] Unable to update cni config: no valid networks fo>
-Jan 22 21:24:48 kubeadm-node1 kubelet[3977]: E0122 21:24:48.251605    3977 kubelet.go:2163] Container runtime network not ready: Network>
-Jan 22 21:25:09 kubeadm-node1 kubelet[3977]: I0122 21:25:09.388780    3977 topology_manager.go:187] [topologymanager] Topology Admit Han>
-Jan 22 21:25:09 kubeadm-node1 kubelet[3977]: I0122 21:25:09.394743    3977 topology_manager.go:187] [topologymanager] Topology Admit Han>
-Jan 22 21:25:09 kubeadm-node1 kubelet[3977]: I0122 21:25:09.480109    3977 reconciler.go:224] operationExecutor.VerifyControllerAttached>
-Jan 22 21:25:09 kubeadm-node1 kubelet[3977]: I0122 21:25:09.480435    3977 reconciler.go:224] operationExecutor.VerifyControllerAttached>
-Jan 22 21:25:09 kubeadm-node1 kubelet[3977]: I0122 21:25:09.480622    3977 reconciler.go:224] operationExecutor.VerifyControllerAttached>
-Jan 22 21:25:09 kubeadm-node1 kubelet[3977]: I0122 21:25:09.480807    3977 reconciler.go:224] operationExecutor.VerifyControllerAttached>
-Jan 22 21:25:09 kubeadm-node1 kubelet[3977]: W0122 21:25:09.872348    3977 pod_container_deletor.go:79] Container "aafbe5be4bcd161fa4397>
-```
+Oct 28 12:32:57 kubeadm-node1.example.com kubelet[2923]: E1028 12:32:57.758756    2923 kubelet.go:2211] "Container runtime network not ready" networkReady="NetworkReady=false reason:NetworkPluginNotReady message:docker: network plugin is not ready: cni config uninitialized"
 
-```
-[root@kubeadm-node1 ~]# kubectl get pods --namespace=kube-system
-NAME                                   READY   STATUS    RESTARTS   AGE
-coredns-74ff55c5b-2h4xc                1/1     Running   0          11h
-coredns-74ff55c5b-5lcb7                1/1     Running   0          11h
-etcd-kubeadm-node1                      1/1     Running   0          11h
-kube-apiserver-kubeadm-node1            1/1     Running   1          11h
-kube-controller-manager-kubeadm-node1   1/1     Running   1          11h
-kube-flannel-ds-ccqtj                  1/1     Running   0          28m
-kube-proxy-95j8m                       1/1     Running   0          11h
-kube-scheduler-kubeadm-node1            1/1     Running   1          11h
+Oct 28 12:33:16 kubeadm-node1.example.com kubelet[2923]: I1028 12:33:16.885574    2923 topology_manager.go:187] "Topology Admit Handler"
+
+Oct 28 12:33:16 kubeadm-node1.example.com kubelet[2923]: I1028 12:33:16.887670    2923 topology_manager.go:187] "Topology Admit Handler"
+
+Oct 28 12:33:16 kubeadm-node1.example.com kubelet[2923]: I1028 12:33:16.923157    2923 reconciler.go:224] "operationExecutor.VerifyControllerAttachedVolume started for volume \"kube-api-access-b4fjl\" (UniqueName: \"kubernetes.io/projected/4e1eccb1-03b6-4faf-848d-235ef1221547-kube-api-access-b4fjl\") pod \"coredns-558bd4d5db-pmp9z\" (UID: \"4e1eccb1-03b6-4faf-848d-235ef1221547\") "
+
+Oct 28 12:33:16 kubeadm-node1.example.com kubelet[2923]: I1028 12:33:16.923205    2923 reconciler.go:224] "operationExecutor.VerifyControllerAttachedVolume started for volume \"config-volume\" (UniqueName: \"kubernetes.io/configmap/4e1eccb1-03b6-4faf-848d-235ef1221547-config-volume\") pod \"coredns-558bd4d5db-pmp9z\" (UID: \"4e1eccb1-03b6-4faf-848d-235ef1221547\") "
+
+Oct 28 12:33:16 kubeadm-node1.example.com kubelet[2923]: I1028 12:33:16.923228    2923 reconciler.go:224] "operationExecutor.VerifyControllerAttachedVolume started for volume \"kube-api-access-dncc8\" (UniqueName: \"kubernetes.io/projected/74985536-d85e-4175-aecb-834412b1d54d-kube-api-access-dncc8\") pod \"coredns-558bd4d5db-k94vv\" (UID: \"74985536-d85e-4175-aecb-834412b1d54d\") "
+
+Oct 28 12:33:16 kubeadm-node1.example.com kubelet[2923]: I1028 12:33:16.923246    2923 reconciler.go:224] "operationExecutor.VerifyControllerAttachedVolume started for volume \"config-volume\" (UniqueName: \"kubernetes.io/configmap/74985536-d85e-4175-aecb-834412b1d54d-config-volume\") pod \"coredns-558bd4d5db-k94vv\" (UID: \"74985536-d85e-4175-aecb-834412b1d54d\") "
+
+Oct 28 12:33:17 kubeadm-node1.example.com kubelet[2923]: map[string]interface {}{"cniVersion":"0.3.1", "hairpinMode":true, "ipMasq":false, "ipam":map[string]interface {}{"ranges":[][]map[string]interface {}{[]map[string]interface {}{map[string]interface {}{"subnet":"10.200.0.0/24"}}}, "routes":[]types.Route{types.Route{Dst:net.IPNet{IP:net.IP{0xa, 0xc8, 0x0, 0x0}, Mask:net.IPMask{0xff, 0xff, 0x0, 0x0}}, GW:net.IP(nil)}}, "type":"host-local"}, "isDefaultGateway":true, "isGateway":true, "mtu":(*uint)(0xc000016908), "name":"cbr0", "type":"bridge"}
+
+Oct 28 12:33:17 kubeadm-node1.example.com kubelet[2923]: {"cniVersion":"0.3.1","hairpinMode":true,"ipMasq":false,"ipam":{"ranges":[[{"subnet":"10.200.0.0/24"}]],"routes":[{"dst":"10.200.0.0/16"}],"type":"host-local"},"isDefaultGateway":true,"isGateway":true,"mtu":1450,"name":"cbr0","type":"bridge"}
+
+Oct 28 12:33:17 kubeadm-node1.example.com kubelet[2923]: map[string]interface {}{"cniVersion":"0.3.1", "hairpinMode":true, "ipMasq":false, "ipam":map[string]interface {}{"ranges":[][]map[string]interface {}{[]map[string]interface {}{map[string]interface {}{"subnet":"10.200.0.0/24"}}}, "routes":[]types.Route{types.Route{Dst:net.IPNet{IP:net.IP{0xa, 0xc8, 0x0, 0x0}, Mask:net.IPMask{0xff, 0xff, 0x0, 0x0}}, GW:net.IP(nil)}}, "type":"host-local"}, "isDefaultGateway":true, "isGateway":true, "mtu":(*uint)(0xc0000a88d8), "name":"cbr0", "type":"bridge"}
+[root@kubeadm-node1 ~]# 
 ```
 
+The node will become **Ready**, and CoreDNS will also start.
+
 ```
-[root@kubeadm-node1 ~]# kubectl get nodes
-NAME           STATUS   ROLES                  AGE   VERSION
-kubeadm-node1   Ready    control-plane,master   11h   v1.20.2
+[root@kubeadm-node1 ~]# kubectl --namespace=kube-system get nodes
+NAME                        STATUS   ROLES                  AGE   VERSION
+kubeadm-node1.example.com   Ready    control-plane,master   58m   v1.21.6
+```
+
+```
+[root@kubeadm-node1 ~]# kubectl --namespace=kube-system get pods
+NAME                                                READY   STATUS    RESTARTS   AGE
+coredns-558bd4d5db-k94vv                            1/1     Running   0          58m
+coredns-558bd4d5db-pmp9z                            1/1     Running   0          58m
+etcd-kubeadm-node1.example.com                      1/1     Running   0          58m
+kube-apiserver-kubeadm-node1.example.com            1/1     Running   0          58m
+kube-controller-manager-kubeadm-node1.example.com   1/1     Running   0          58m
+kube-flannel-ds-7m9jc                               1/1     Running   0          11m
+kube-proxy-sgb9d                                    1/1     Running   0          58m
+kube-scheduler-kubeadm-node1.example.com            1/1     Running   0          58m
 [root@kubeadm-node1 ~]# 
 ```
 
 The Flannel podnetwork is now up. Good!
 
 
-## Check cluster health:
+### Check cluster health:
 
 On older Kubernetes versions (< 1.19):
 ```
@@ -1045,7 +1162,7 @@ etcd-0               Healthy   {"health": "true"}
 [student@kubeadm-node1 ~]$ 
 ```
 
-On newer Kubernetes version (1.19+), you will get an **"Unhealthy"** status:
+On newer Kubernetes version (1.19+), you will get an **"Unhealthy"** status against `get componentstatuses` command. The real check on newer clusters is that **the node is "Ready"**.
 
 ```
 [root@kubeadm-node1 ~]# kubectl get componentstatuses
@@ -1062,8 +1179,8 @@ This is mentioned [here:](https://github.com/kubernetes/kubernetes/blob/master/C
 > Kube-apiserver: the componentstatus API is deprecated. This API provided status of etcd, kube-scheduler, and kube-controller-manager components, but only worked when those components were local to the API server, and when kube-scheduler and kube-controller-manager exposed unsecured health endpoints. Instead of this API, etcd health is included in the kube-apiserver health check and kube-scheduler/kube-controller-manager health checks can be made directly against those components' health endpoints. (#93570, @liggitt) [SIG API Machinery, Apps and Cluster Lifecycle]
 
 
-### Remove taints on master:
-Now, remove the taints on the master so that you can schedule pods on it. If you want to keep it a dedicated master node, and plan to add worker nodes, then you can skip this step.
+### Optional - Remove taints on master:
+Now, remove the taints on the master so that you can schedule pods on it. If you want to keep it a dedicated master node, and plan to run your applications only on worker nodes (added later), then you can skip this step.
 
 ```
 kubectl taint nodes --all node-role.kubernetes.io/master-
@@ -1108,7 +1225,7 @@ tigera-operator   tigera-operator-657cc89589-5rl4z          1/1     Running   0 
 ```
 
 
-Let's see if we can run a simple nginx container, in the `default` namespace. (You do not need to explicitly mention default in the command line - duh!)
+Let's see if we can run a simple nginx container, in the `default` name-space. (You do not need to explicitly mention `default` in the command line - duh!)
 
 ```
 [root@kubeadm-node1 ~]# kubectl run nginx --image=nginx:alpine
@@ -1143,33 +1260,30 @@ Since this guide is about running a multi-node kubeadm based kubernetes cluster,
 
 ------
 
-# Add / join a node:
+## Add / join a node:
 
 To join a new node to the cluster, you need to satisfy the following conditions first:
 * You have SSH / root access to the node
 * You have already setup a container runtime, such as Docker on it, and it is in working order
 * You have downloaded and installed kubeadm, kubelet and kubectl on it
 
-When you executed `kubeadm init`, you were given a command to run on the nodes you want to join to this cluster. 
+When you executed `kubeadm init`, you were given instructions for the nodes you want to join to this cluster. 
 
 ```
 You can now join any number of machines by running the following on each node
 as root:
 
-  kubeadm join 10.240.0.31:6443 --token axzi13.323q1c2oqtzwpnvt \
-    --discovery-token-ca-cert-hash sha256:b4938932a8d2eb82642a1d48b6ae828ef7fcccc3d249480ea8f814378a380e02 \
-    --ignore-preflight-errors="SystemVerification"
+  kubeadm join 10.240.0.31:6443 --token w1nvi9.l4c7jfjw69pp6zl4 \
+        --discovery-token-ca-cert-hash sha256:394d169c4d594ad6110ce7c093fca65b49d598a058085dd9a36ca36037cfd09a
 ```
 
 So we can do that now. Please note that the token is only valid for 24 hours after the initialization of the cluster. If you are trying to join a node to the cluster after 24 hours have passed, you need to generate a new token. That can be done simply by running `kubeadm token create` on the master node. Then use the new token in the `kubeadm join` command.
 
 
 ```
-[root@kubeadm-node2 ~]#   kubeadm join 10.240.0.31:6443 --token axzi13.323q1c2oqtzwpnvt \
->     --discovery-token-ca-cert-hash sha256:b4938932a8d2eb82642a1d48b6ae828ef7fcccc3d249480ea8f814378a380e02 \
->     --ignore-preflight-errors="SystemVerification"
+[root@kubeadm-node2 ~]# kubeadm join 10.240.0.31:6443 --token w1nvi9.l4c7jfjw69pp6zl4 \
+        --discovery-token-ca-cert-hash sha256:394d169c4d594ad6110ce7c093fca65b49d598a058085dd9a36ca36037cfd09a 
 [preflight] Running pre-flight checks
-	[WARNING SystemVerification]: this Docker version is not on the list of validated versions: 20.10.2. Latest validated version: 19.03
 [preflight] Reading configuration from the cluster...
 [preflight] FYI: You can look at this config file with 'kubectl -n kube-system get cm kubeadm-config -o yaml'
 [kubelet-start] Writing kubelet configuration to file "/var/lib/kubelet/config.yaml"
@@ -1186,28 +1300,35 @@ Run 'kubectl get nodes' on the control-plane to see this node join the cluster.
 [root@kubeadm-node2 ~]# 
 ```
 
-**Note:** I appended `--ignore-preflight-errors="SystemVerification"` to the `kubeadm join` command, becaue I am using a newer version of Docker
-
-If you check the list of nodes now, you should be able to see node2 too.
+If you check the list of nodes now, you should be able to see "node2" as "Ready" too. If you see node2 as "NotReady", read next section.
 
 ```
-[root@kubeadm-node1 ~]# kubectl  get nodes 
-NAME            STATUS   ROLES                  AGE   VERSION
-kubeadm-node1   Ready    control-plane,master   44m   v1.20.2
-kubeadm-node2   Ready    <none>                 77s   v1.20.2
-[root@kubeadm-node1 ~]#
+[root@kubeadm-node1 ~]# kubectl get nodes
+NAME                        STATUS   ROLES                  AGE   VERSION
+kubeadm-node1.example.com   Ready    control-plane,master   88m   v1.21.6
+kubeadm-node2.example.com   Ready    <none>                 19m   v1.21.6
 
-[root@kubeadm-node1 ~]# kubectl  get nodes  -o wide
-NAME            STATUS   ROLES                  AGE   VERSION   INTERNAL-IP   EXTERNAL-IP   OS-IMAGE                     KERNEL-VERSION           CONTAINER-RUNTIME
-kubeadm-node1   Ready    control-plane,master   44m   v1.20.2   10.240.0.31   <none>        Fedora 33 (Server Edition)   5.10.7-200.fc33.x86_64   docker://20.10.2
-kubeadm-node2   Ready    <none>                 98s   v1.20.2   10.240.0.32   <none>        Fedora 33 (Server Edition)   5.10.7-200.fc33.x86_64   docker://20.10.2
-[root@kubeadm-node1 ~]# 
+[root@kubeadm-node1 ~]# kubectl get nodes -o wide
+NAME                        STATUS   ROLES                  AGE   VERSION   INTERNAL-IP   EXTERNAL-IP   OS-IMAGE                     KERNEL-VERSION            CONTAINER-RUNTIME
+kubeadm-node1.example.com   Ready    control-plane,master   88m   v1.21.6   10.240.0.31   <none>        Fedora 34 (Server Edition)   5.14.13-200.fc34.x86_64   docker://20.10.10
+kubeadm-node2.example.com   Ready    <none>                 20m   v1.21.6   10.240.0.32   <none>        Fedora 34 (Server Edition)   5.14.13-200.fc34.x86_64   docker://20.10.10
+[root@kubeadm-node1 ~]#  
 ```
 
 Repeat above procedure to join more worker nodes.
 
 
-If you chose to not *"untaint"* the master node, and your nginx pod was in Pending state, then now the scheduler should automatically assign nginx pod to this new node2.
+### What if the newly joined node is still "NotReady":
+
+The problem is that flannel will be expecting dependent network plugins in `/opt/cni/bin` on each node. If it does not find it then kubelet is unable to start flannel on the new node. So on Fedora 33+, repeat the copy operation.
+
+```
+cp /usr/libexec/cni/*  /opt/cni/bin/
+```
+
+
+
+If (earlier) you chose not to *"untaint"* the master node, and your nginx pod was in Pending state, then now the scheduler should automatically assign nginx pod to this newly added **"Node2"**.
 
 ```
 [student@kubeadm-node1 ~]$ kubectl get pods
@@ -1226,49 +1347,38 @@ Hurray! It works!
 Here is a more detailed, *complete picture*, of the cluster when everything is working properly. Notice, only `kube-system` namespace is queried in the command below.
 ```
 [root@kubeadm-node1 ~]# kubectl --all-namespaces=true get all
-NAMESPACE         NAME                                          READY   STATUS    RESTARTS   AGE
-calico-system     pod/calico-kube-controllers-b87bd7f6f-k2hdv   1/1     Running   0          28m
-calico-system     pod/calico-node-d6zg2                         1/1     Running   0          4m41s
-calico-system     pod/calico-node-lxrkq                         1/1     Running   0          28m
-calico-system     pod/calico-typha-588c975bc5-2b8xg             1/1     Running   0          2m55s
-calico-system     pod/calico-typha-588c975bc5-wkfcw             1/1     Running   0          28m
-default           pod/nginx                                     1/1     Running   0          9m46s
-kube-system       pod/coredns-74ff55c5b-9nq69                   1/1     Running   0          47m
-kube-system       pod/coredns-74ff55c5b-xdzxr                   1/1     Running   0          47m
-kube-system       pod/etcd-kubeadm-node1                        1/1     Running   0          47m
-kube-system       pod/kube-apiserver-kubeadm-node1              1/1     Running   0          47m
-kube-system       pod/kube-controller-manager-kubeadm-node1     1/1     Running   0          47m
-kube-system       pod/kube-proxy-4lxs4                          1/1     Running   0          4m41s
-kube-system       pod/kube-proxy-nn29f                          1/1     Running   0          47m
-kube-system       pod/kube-scheduler-kubeadm-node1              1/1     Running   0          47m
-tigera-operator   pod/tigera-operator-657cc89589-5rl4z          1/1     Running   0          29m
+NAMESPACE     NAME                                                    READY   STATUS    RESTARTS   AGE
+default       pod/multitool                                           1/1     Running   1          76m
+kube-system   pod/coredns-558bd4d5db-k94vv                            1/1     Running   1          141m
+kube-system   pod/coredns-558bd4d5db-pmp9z                            1/1     Running   1          141m
+kube-system   pod/etcd-kubeadm-node1.example.com                      1/1     Running   1          141m
+kube-system   pod/kube-apiserver-kubeadm-node1.example.com            1/1     Running   1          141m
+kube-system   pod/kube-controller-manager-kubeadm-node1.example.com   1/1     Running   1          141m
+kube-system   pod/kube-flannel-ds-7m9jc                               1/1     Running   1          93m
+kube-system   pod/kube-flannel-ds-vnpq6                               1/1     Running   1          73m
+kube-system   pod/kube-proxy-rfwcc                                    1/1     Running   1          73m
+kube-system   pod/kube-proxy-sgb9d                                    1/1     Running   1          141m
+kube-system   pod/kube-scheduler-kubeadm-node1.example.com            1/1     Running   1          141m
 
-NAMESPACE       NAME                   TYPE        CLUSTER-IP    EXTERNAL-IP   PORT(S)                  AGE
-calico-system   service/calico-typha   ClusterIP   10.32.42.78   <none>        5473/TCP                 28m
-default         service/kubernetes     ClusterIP   10.32.0.1     <none>        443/TCP                  47m
-kube-system     service/kube-dns       ClusterIP   10.32.0.10    <none>        53/UDP,53/TCP,9153/TCP   47m
+NAMESPACE     NAME                 TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)                  AGE
+default       service/kubernetes   ClusterIP   10.32.0.1    <none>        443/TCP                  141m
+kube-system   service/kube-dns     ClusterIP   10.32.0.10   <none>        53/UDP,53/TCP,9153/TCP   141m
 
-NAMESPACE       NAME                         DESIRED   CURRENT   READY   UP-TO-DATE   AVAILABLE   NODE SELECTOR            AGE
-calico-system   daemonset.apps/calico-node   2         2         2       2            2           kubernetes.io/os=linux   28m
-kube-system     daemonset.apps/kube-proxy    2         2         2       2            2           kubernetes.io/os=linux   47m
+NAMESPACE     NAME                             DESIRED   CURRENT   READY   UP-TO-DATE   AVAILABLE   NODE SELECTOR            AGE
+kube-system   daemonset.apps/kube-flannel-ds   2         2         2       2            2           <none>                   93m
+kube-system   daemonset.apps/kube-proxy        2         2         2       2            2           kubernetes.io/os=linux   141m
 
-NAMESPACE         NAME                                      READY   UP-TO-DATE   AVAILABLE   AGE
-calico-system     deployment.apps/calico-kube-controllers   1/1     1            1           28m
-calico-system     deployment.apps/calico-typha              2/2     2            2           28m
-kube-system       deployment.apps/coredns                   2/2     2            2           47m
-tigera-operator   deployment.apps/tigera-operator           1/1     1            1           29m
+NAMESPACE     NAME                      READY   UP-TO-DATE   AVAILABLE   AGE
+kube-system   deployment.apps/coredns   2/2     2            2           141m
 
-NAMESPACE         NAME                                                DESIRED   CURRENT   READY   AGE
-calico-system     replicaset.apps/calico-kube-controllers-b87bd7f6f   1         1         1       28m
-calico-system     replicaset.apps/calico-typha-588c975bc5             2         2         2       28m
-kube-system       replicaset.apps/coredns-74ff55c5b                   2         2         2       47m
-tigera-operator   replicaset.apps/tigera-operator-657cc89589          1         1         1       29m
+NAMESPACE     NAME                                 DESIRED   CURRENT   READY   AGE
+kube-system   replicaset.apps/coredns-558bd4d5db   2         2         2       141m
 [root@kubeadm-node1 ~]# 
 ```
 
 ------
 
-# Accessing your cluster from machines other than the master node:
+## Accessing your cluster from machines other than the master node:
 
 So far, we are able to talk to our Kubernetes cluster from node1, as user student. It is because that is where we have configured our `.kube/config` which is used by `kubectl` commands. To be able to access the cluster from some other computer, such as your work computer, etc, you need to copy the administrator kubeconfig file from your master node to your computer like this:
 
@@ -1278,7 +1388,9 @@ scp student@<master-node-ip>:/home/student/.kube/config  ~/.kube/kubeadm-cluster
 kubectl --kubeconfig ~/.kube/kubeadm-cluster.conf get nodes
 ```
 
-It might be a hassle to include `--kubeconfig ~/.kube/kubeadm-cluster.conf` in every kubectl command. You can setup a shell alias, or you can simply save it as `~/.kube/config` on your work computer. **WARNING** However, it is possible that you already have `~/.kube/config` file, which might contain configuration to one or more existing kubernetes clusters, and you don't want to accidently lose access to those clusters by over-writing it with this `.kube/config` . To be able to retain access to those clusters, and still also be able to use this kubeadm cluster, all from single kubectl, without specifying `--kubeconfig` everytime, you can use the KUBECONFIG environment variable. 
+It might be a hassle to include `--kubeconfig ~/.kube/kubeadm-cluster.conf` in every invocation of `kubectl` command. You can setup a shell alias, or you can simply save it as `~/.kube/config` on your work computer. 
+
+**WARNING** It is possible that you already have `~/.kube/config` file, which might contain configuration to one or more existing kubernetes clusters, and you don't want to accidentally lose access to those clusters by over-writing it with this `.kube/config` . To be able to retain access to those clusters, and still also be able to use this kubeadm cluster, all from single kubectl, without specifying `--kubeconfig` everytime, you can use the KUBECONFIG environment variable. 
 
 Lets start at master node, where we have a working copy of our `.kube/config` file.
 First, we need to fix the default config we got from kubeadm. It is not very helpful in identifying which cluster is it. e.g. look at the following information. It looks very vague:
@@ -1343,7 +1455,7 @@ nginx-64d9675947-nw4kl   1/1       Running   0          11m
 [kamran@kworkhorse ~]$
 ```
 
-Notice that my default .kube/config lists two clusters, one of them is production cluster for a client. I don't want to lose this configuration. 
+Notice that my default `.kube/config` file lists two clusters, one of them is production cluster for a client. I don't want to lose this configuration. 
 
 ```
 [kamran@kworkhorse ~]$ kubectl config get-contexts
@@ -1353,7 +1465,9 @@ CURRENT   NAME                    CLUSTER                 AUTHINFO   NAMESPACE
 [kamran@kworkhorse ~]$ 
 ```
 
-So I have verified that without using `--kubeconfig` with `kubectl`, I can access my previous clusters. By using a specific configuration with `--kubeconfig` , I can access my kubeadm cluster. Is it possible to merge these two configurations? No. Not directly, which is actually a safety feature. Check this article for more detail: [https://kubernetes.io/docs/tasks/access-application-cluster/configure-access-multiple-clusters/#set-the-kubeconfig-environment-variable](https://kubernetes.io/docs/tasks/access-application-cluster/configure-access-multiple-clusters/#set-the-kubeconfig-environment-variable) .
+I have verified that without using `--kubeconfig` with `kubectl`, I can access my previous clusters. By using a specific configuration with `--kubeconfig` , I can access my kubeadm cluster. 
+
+So, is it possible to merge these two configurations? No. Not directly, which is actually a safety feature. Check this article for more detail: [https://kubernetes.io/docs/tasks/access-application-cluster/configure-access-multiple-clusters/#set-the-kubeconfig-environment-variable](https://kubernetes.io/docs/tasks/access-application-cluster/configure-access-multiple-clusters/#set-the-kubeconfig-environment-variable) .
 
 I will solve it by using the KUBECONFIG environment variable as described in the above link. Here is how:
 
@@ -1414,6 +1528,11 @@ KUBECONFIG=$KUBECONFIG:$HOME/.kube/config:$HOME/.kube/kubeadm-cluster.conf
 export PATH KUBECONFIG
 ```
 
+**Notes:**
+* The `admin.conf` file (`/etc/kubernetes/admin.conf` on master node, copied as `/home/student/.kube/config`) gives the user superuser privileges over the cluster. This file should be used very carefully. For normal users, it’s recommended to generate an unique credential, to which you whitelist privileges. You can do this with the `kubeadm alpha phase kubeconfig user --client-name <client-name>` command. This command will print out a KubeConfig file to STDOUT which you should save to a file and distribute to your user. After that, whitelist privileges by using `kubectl create (cluster)rolebinding`.
 
-**Note:**
-The `admin.conf` file (`/etc/kubernetes/admin.conf` on master node, copied as `/home/student/.kube/config`) gives the user superuser privileges over the cluster. This file should be used very carefully. For normal users, it’s recommended to generate an unique credential, to which you whitelist privileges. You can do this with the `kubeadm alpha phase kubeconfig user --client-name <client-name>` command. This command will print out a KubeConfig file to STDOUT which you should save to a file and distribute to your user. After that, whitelist privileges by using `kubectl create (cluster)rolebinding`.
+
+### About Azure cli:
+The Azure cli command does not understand the possibility of KUBECONFIG variable set to multiple paths of multiple config files. So the `az aks get-credentials` command creates a new file on your computer, with a silly name: `/home/kamran/.kube/config:/home/kamran/.kube/kubeadm-cluster.conf` , and adds it's cluster credentials in that. You have to watch out for that. 
+
+To avoid this problem from happening, first set your KUBECONFIG variable, to just one file, such as `/home/kamran/.kube/config` . Then, run the `az aks get-credentials` command, which will add the credentials of your AKS cluster credentials in that file. Then you change it back to what it was, such as `/home/kamran/.kube/config:/home/kamran/.kube/kubeadm-cluster.conf`.

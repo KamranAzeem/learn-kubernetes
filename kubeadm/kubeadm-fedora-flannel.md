@@ -1348,7 +1348,7 @@ Here is a more detailed, *complete picture*, of the cluster when everything is w
 ```
 [root@kubeadm-node1 ~]# kubectl --all-namespaces=true get all
 NAMESPACE     NAME                                                    READY   STATUS    RESTARTS   AGE
-default       pod/multitool                                           1/1     Running   1          76m
+default       pod/nginx                                               1/1     Running   1          76m
 kube-system   pod/coredns-558bd4d5db-k94vv                            1/1     Running   1          141m
 kube-system   pod/coredns-558bd4d5db-pmp9z                            1/1     Running   1          141m
 kube-system   pod/etcd-kubeadm-node1.example.com                      1/1     Running   1          141m

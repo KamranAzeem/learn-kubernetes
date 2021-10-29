@@ -1,5 +1,31 @@
 # KubeAdm based kubernetes cluster
 
+**IMPORTANT NOTE:** There is a strange problem with the recent version of flannel. The flannel pods come up, but DNS does not work. DNS queries on the DNS service ip (10.32.0.10), or on the internal pod IP addresses of the coredns pods do not work. For now please use Calico CNI plugin, explained in a separate document within this repository.  
+
+Above message will be removed once the problem is identified and a fix is found. Until then, **please do not use this document**.
+
+e.g. All DNS queries simply timeout:
+
+```
+[kamran@kworkhorse .kube]$ kubectl exec -it multitool bash
+
+bash-5.1# dig kubernetes.default
+
+^C
+
+bash-5.1# dig google.com
+
+^C
+
+bash-5.1# dig kubernetes.default.svc.cluster.local
+
+^C
+
+bash-5.1# 
+exit
+```
+
+
 **Note:** This document is updated to use Fedora 34. 
 
 Reference documentation: [https://kubernetes.io/docs/setup/independent/install-kubeadm/](https://kubernetes.io/docs/setup/independent/install-kubeadm/)
@@ -41,7 +67,7 @@ In this guide, I will setup a single node kubernetes cluster using **kubeadm** a
 ## Preparation:
 * **RAM:** Minimum 1 GB RAM for each node (master+worker); you will only be able to run very few (and very small) containers, like nginx, mysql, etc. **2 GB RAM is better**.
 * **CPU:** Minimum 2 CPU for master node; worker nodes can live with single core CPUs
-* **Disk:** 4 GB for host OS + 20 GB for storing container images. (no swap)
+* **Disk:** 20 GB for host OS + storage for container images. (no swap)
 * **Network - Infrastructure:** A functional virtual/physical network with some usable IP addresses (can be public or private) . This can be on any cloud provider as well. You are free to use any network / ip scheme for yourself. In this guide, it will be `10.240.0.0/24`
 * **Network - Pod network (pod-network-cidr):** A network IP range completely separate from other two networks, with subnet mask of `/16` or smaller (e.g. `/12`). This network will be subdivided into subnets later. In this guide it will be `10.200.0.0/16` . Please note that kubeadm does not support kubenet, so we need to use one of the CNI add-ons - such as flannel. By default Flannel sets up a pod network `10.244.0.0/16`, which means that we need to pass this pod network to `kubeadm init` (further below); or, modify the flannel configuration with the pod network of our own choice - before actually applying it blindly. :)
 * **Network - Service network (service-cidr):** A network IP range completely separate from other two networks, used by the services. This will be considered a completely virtual network. The default service network configured by kubeadm is `10.96.0.0/12`. In this guide, it will be `10.32.0.0/16`.
@@ -58,24 +84,19 @@ In this guide, I will setup a single node kubernetes cluster using **kubeadm** a
 **Note:** Almost all commands in this document are run as user **"root"** while *logged in* as "root" - which eliminates the need to add the word "sudo" in front of each command. Therefore, I won't use "sudo".  
 
 ```
-[root@kworkhorse lib]# cat /etc/hosts
-127.0.0.1   localhost localhost.localdomain
+cat >> /etc/hosts << EOF
 
- # Virtual Kubernetes cluster
+# Virtual Kubernetes cluster
 10.240.0.31	kubeadm-node1
 10.240.0.32	kubeadm-node2
 10.240.0.33	kubeadm-node3
-```
-
-```
-yum -y remove firewalld
-
-yum -y install ebtables iproute-tc NetworkManager-tui
+EOF
 ```
 
 ```
 sed -i 's/^SELINUX=enforcing$/SELINUX=disabled/' /etc/selinux/config
 ```
+
 
 ```
 cat > /etc/modules-load.d/k8s.conf <<EOF
@@ -100,6 +121,13 @@ cat >> /etc/security/limits.d/k8s.conf <<EOF
 *       soft    nofile  16000
 *       hard    nofile  32000
 EOF
+```
+
+
+```
+yum -y remove firewalld
+
+yum -y install ebtables iproute-tc NetworkManager-tui
 ```
 
 
@@ -234,7 +262,6 @@ Kernel IP routing table
 Destination     Gateway         Genmask         Flags Metric Ref    Use Iface
 0.0.0.0         10.240.0.1      0.0.0.0         UG    100    0        0 enp1s0
 10.240.0.0      0.0.0.0         255.255.255.0   U     100    0        0 enp1s0
-172.17.0.0      0.0.0.0         255.255.0.0     U     0      0        0 docker0
 [root@kubeadm-node1 ~]#
 ```
 
@@ -393,7 +420,7 @@ systemctl start docker
 systemctl status docker
 ```
 
-### Install kubeadm, kubelet and kubectl:
+### Install `kubeadm`, `kubelet` and `kubectl`:
 On each node, install:
 * kubeadm: the command to actually setup / bootstrap the cluster.
 * kubelet: the component that runs on all of the machines in your cluster and does things like starting pods and containers.
@@ -425,7 +452,7 @@ systemctl enable kubelet
 systemctl start kubelet
 ```
 
-The above command installs additional packages, which are:
+The above command installs some additional packages, which are:
 * cri-tools  - Command line utility to interact with container runtime, such as docker)
 * containernetworking-plugins (formerly *kubernetes-cni*) - Binary files to provision container networking. The files are installed in `/opt/cni/bin` or `/usr/libexec/cni` depending on the version of Fedora you are using.
 * socat - Relay for bidirectional data transfer between two independent data channels, e.g. files, pipe, device, socket, program, etc.
@@ -439,18 +466,18 @@ The above command installs additional packages, which are:
 
 
 ```
-yum list kubelet kubeadm kubectl --disableexcludes=kubernetes
+yum -y list kubelet kubeadm kubectl --disableexcludes=kubernetes
 ```
 
 OR
 
 ```
-yum list kubelet kubeadm kubectl --disableexcludes=kubernetes --showduplicates
+yum -y list kubelet kubeadm kubectl --disableexcludes=kubernetes --showduplicates
 ```
 
 
 ```
-[root@kubeadm-node1 ~]# yum list kubelet kubeadm kubectl --disableexcludes=kubernetes --showduplicates
+[root@kubeadm-node1 ~]# yum -y list kubelet kubeadm kubectl --disableexcludes=kubernetes --showduplicates
 . . . 
 
 kubelet.x86_64                                                   1.20.5-0                                                     kubernetes
@@ -476,7 +503,7 @@ kubelet.x86_64                                                   1.22.3-0       
 ```
 
 ```
-[root@kubeadm-node1 ~]# yum list kubelet-1.21.6-0 kubeadm-1.21.6-0 kubectl-1.21.6-0 --disableexcludes=kubernetes
+[root@kubeadm-node1 ~]# yum -y list kubelet-1.21.6-0 kubeadm-1.21.6-0 kubectl-1.21.6-0 --disableexcludes=kubernetes
 Last metadata expiration check: 0:22:41 ago on Sat 06 Feb 2021 08:28:03 PM CET.
 Available Packages
 kubeadm.x86_64                                                    1.21.6-0                                                    kubernetes
@@ -621,6 +648,14 @@ By this time, `kubeadm` is only *installed* - and is not *running*.
 
 ### Activate/enable kubelet to boot at startup:
 Since `kubelet` is required to run on all "master" and "worker" nodes, we enable it now. 
+
+```
+systemctl enable kubelet
+
+systemctl start kubelet
+```
+
+
 ```
 [root@kubeadm-node1 ~]# systemctl enable kubelet
 Created symlink /etc/systemd/system/multi-user.target.wants/kubelet.service → /usr/lib/systemd/system/kubelet.service.
@@ -659,6 +694,12 @@ cp /usr/libexec/cni/*  /opt/cni/bin/
 ```
 
 More detailed explanation for this will come later when we install Flannel.
+
+
+Lastly update the OS:
+```
+yum -y update
+```
 
 ------
 
@@ -744,7 +785,7 @@ If you do not use `--kubernetes-version "<string>"`, then one of two things will
 [root@kubeadm-node1 ~]# kubeadm init \
   --pod-network-cidr "10.200.0.0/16" \
   --service-cidr "10.32.0.0/16"
-I1028 11:34:21.490312    1005 version.go:254] remote version is much newer: v1.22.3; falling back to: stable-1.21
+
 [init] Using Kubernetes version: v1.21.6
 [preflight] Running pre-flight checks
 [preflight] Pulling images required for setting up a Kubernetes cluster
@@ -753,15 +794,15 @@ I1028 11:34:21.490312    1005 version.go:254] remote version is much newer: v1.2
 [certs] Using certificateDir folder "/etc/kubernetes/pki"
 [certs] Generating "ca" certificate and key
 [certs] Generating "apiserver" certificate and key
-[certs] apiserver serving cert is signed for DNS names [kubeadm-node1.example.com kubernetes kubernetes.default kubernetes.default.svc kubernetes.default.svc.cluster.local] and IPs [10.32.0.1 10.240.0.31]
+[certs] apiserver serving cert is signed for DNS names [kubeadm-node1 kubernetes kubernetes.default kubernetes.default.svc kubernetes.default.svc.cluster.local] and IPs [10.32.0.1 10.240.0.31]
 [certs] Generating "apiserver-kubelet-client" certificate and key
 [certs] Generating "front-proxy-ca" certificate and key
 [certs] Generating "front-proxy-client" certificate and key
 [certs] Generating "etcd/ca" certificate and key
 [certs] Generating "etcd/server" certificate and key
-[certs] etcd/server serving cert is signed for DNS names [kubeadm-node1.example.com localhost] and IPs [10.240.0.31 127.0.0.1 ::1]
+[certs] etcd/server serving cert is signed for DNS names [kubeadm-node1 localhost] and IPs [10.240.0.31 127.0.0.1 ::1]
 [certs] Generating "etcd/peer" certificate and key
-[certs] etcd/peer serving cert is signed for DNS names [kubeadm-node1.example.com localhost] and IPs [10.240.0.31 127.0.0.1 ::1]
+[certs] etcd/peer serving cert is signed for DNS names [kubeadm-node1 localhost] and IPs [10.240.0.31 127.0.0.1 ::1]
 [certs] Generating "etcd/healthcheck-client" certificate and key
 [certs] Generating "apiserver-etcd-client" certificate and key
 [certs] Generating "sa" key and public key
@@ -779,13 +820,13 @@ I1028 11:34:21.490312    1005 version.go:254] remote version is much newer: v1.2
 [control-plane] Creating static Pod manifest for "kube-scheduler"
 [etcd] Creating static Pod manifest for local etcd in "/etc/kubernetes/manifests"
 [wait-control-plane] Waiting for the kubelet to boot up the control plane as static Pods from directory "/etc/kubernetes/manifests". This can take up to 4m0s
-[apiclient] All control plane components are healthy after 16.503749 seconds
+[apiclient] All control plane components are healthy after 17.008830 seconds
 [upload-config] Storing the configuration used in ConfigMap "kubeadm-config" in the "kube-system" Namespace
 [kubelet] Creating a ConfigMap "kubelet-config-1.21" in namespace kube-system with the configuration for the kubelets in the cluster
 [upload-certs] Skipping phase. Please see --upload-certs
-[mark-control-plane] Marking the node kubeadm-node1.example.com as control-plane by adding the labels: [node-role.kubernetes.io/master(deprecated) node-role.kubernetes.io/control-plane node.kubernetes.io/exclude-from-external-load-balancers]
-[mark-control-plane] Marking the node kubeadm-node1.example.com as control-plane by adding the taints [node-role.kubernetes.io/master:NoSchedule]
-[bootstrap-token] Using token: w1nvi9.l4c7jfjw69pp6zl4
+[mark-control-plane] Marking the node kubeadm-node1 as control-plane by adding the labels: [node-role.kubernetes.io/master(deprecated) node-role.kubernetes.io/control-plane node.kubernetes.io/exclude-from-external-load-balancers]
+[mark-control-plane] Marking the node kubeadm-node1 as control-plane by adding the taints [node-role.kubernetes.io/master:NoSchedule]
+[bootstrap-token] Using token: e6styb.2zbr6f36s4dol0zi
 [bootstrap-token] Configuring bootstrap tokens, cluster-info ConfigMap, RBAC Roles
 [bootstrap-token] configured RBAC rules to allow Node Bootstrap tokens to get nodes
 [bootstrap-token] configured RBAC rules to allow Node Bootstrap tokens to post CSRs in order for nodes to get long term certificate credentials
@@ -814,8 +855,9 @@ Run "kubectl apply -f [podnetwork].yaml" with one of the options listed at:
 
 Then you can join any number of worker nodes by running the following on each as root:
 
-kubeadm join 10.240.0.31:6443 --token w1nvi9.l4c7jfjw69pp6zl4 \
-	--discovery-token-ca-cert-hash sha256:394d169c4d594ad6110ce7c093fca65b49d598a058085dd9a36ca36037cfd09a 
+kubeadm join 10.240.0.31:6443 --token e6styb.2zbr6f36s4dol0zi \
+	--discovery-token-ca-cert-hash sha256:6ca750e377a5f0e83b73b9e6fd2017a0dd264172084fb07f2bd3849c414a48d8 
+
 [root@kubeadm-node1 ~]#
 ```
 
@@ -874,6 +916,8 @@ export KUBECONFIG=/etc/kubernetes/admin.conf
 OR
 
 ```
+mkdir /root/.kube 
+
 cp /etc/kubernetes/admin.conf /root/.kube/config
 ```
 
@@ -1081,7 +1125,7 @@ total 60M
 
 
 ```
-[root@kubeadm-node1 ~]# mkdir /opt/cni/bin -p
+[root@kubeadm-node1 ~]# mkdir -p /opt/cni/bin
 
 [root@kubeadm-node1 ~]# cp /usr/libexec/cni/*  /opt/cni/bin/
 ```
@@ -1125,13 +1169,8 @@ Oct 28 12:33:17 kubeadm-node1.example.com kubelet[2923]: map[string]interface {}
 [root@kubeadm-node1 ~]# 
 ```
 
-The node will become **Ready**, and CoreDNS will also start.
+The CoreDNS will start, and node will become **Ready**.
 
-```
-[root@kubeadm-node1 ~]# kubectl --namespace=kube-system get nodes
-NAME                        STATUS   ROLES                  AGE   VERSION
-kubeadm-node1.example.com   Ready    control-plane,master   58m   v1.21.6
-```
 
 ```
 [root@kubeadm-node1 ~]# kubectl --namespace=kube-system get pods
@@ -1145,6 +1184,12 @@ kube-flannel-ds-7m9jc                               1/1     Running   0         
 kube-proxy-sgb9d                                    1/1     Running   0          58m
 kube-scheduler-kubeadm-node1.example.com            1/1     Running   0          58m
 [root@kubeadm-node1 ~]# 
+```
+
+```
+[root@kubeadm-node1 ~]# kubectl --namespace=kube-system get nodes
+NAME                        STATUS   ROLES                  AGE   VERSION
+kubeadm-node1.example.com   Ready    control-plane,master   58m   v1.21.6
 ```
 
 The Flannel podnetwork is now up. Good!
@@ -1273,16 +1318,17 @@ When you executed `kubeadm init`, you were given instructions for the nodes you 
 You can now join any number of machines by running the following on each node
 as root:
 
-  kubeadm join 10.240.0.31:6443 --token w1nvi9.l4c7jfjw69pp6zl4 \
-        --discovery-token-ca-cert-hash sha256:394d169c4d594ad6110ce7c093fca65b49d598a058085dd9a36ca36037cfd09a
+kubeadm join 10.240.0.31:6443 --token e6styb.2zbr6f36s4dol0zi \
+	--discovery-token-ca-cert-hash sha256:6ca750e377a5f0e83b73b9e6fd2017a0dd264172084fb07f2bd3849c414a48d8 
 ```
 
 So we can do that now. Please note that the token is only valid for 24 hours after the initialization of the cluster. If you are trying to join a node to the cluster after 24 hours have passed, you need to generate a new token. That can be done simply by running `kubeadm token create` on the master node. Then use the new token in the `kubeadm join` command.
 
 
 ```
-[root@kubeadm-node2 ~]# kubeadm join 10.240.0.31:6443 --token w1nvi9.l4c7jfjw69pp6zl4 \
-        --discovery-token-ca-cert-hash sha256:394d169c4d594ad6110ce7c093fca65b49d598a058085dd9a36ca36037cfd09a 
+[root@kubeadm-node2 ~]# kubeadm join 10.240.0.31:6443 --token e6styb.2zbr6f36s4dol0zi \
+	--discovery-token-ca-cert-hash sha256:6ca750e377a5f0e83b73b9e6fd2017a0dd264172084fb07f2bd3849c414a48d8
+
 [preflight] Running pre-flight checks
 [preflight] Reading configuration from the cluster...
 [preflight] FYI: You can look at this config file with 'kubectl -n kube-system get cm kubeadm-config -o yaml'
@@ -1409,9 +1455,9 @@ With a little `sed` , I changed the `.kube/config` for the student user.
 
 
 ```
-[student@kubeadm-node1 tmp]$ sed -i 's/kubernetes-admin/kubeadm-admin/g' $HOME/.kube/config
+sed -i 's/kubernetes-admin/kubeadm-admin/g' $HOME/.kube/config
 
-[student@kubeadm-node1 tmp]$ sed -i 's/kubernetes/kubeadm-cluster/g' $HOME/.kube/config
+sed -i 's/kubernetes/kubeadm-cluster/g' $HOME/.kube/config
 ```
 
 
@@ -1529,7 +1575,7 @@ export PATH KUBECONFIG
 ```
 
 **Notes:**
-* The `admin.conf` file (`/etc/kubernetes/admin.conf` on master node, copied as `/home/student/.kube/config`) gives the user superuser privileges over the cluster. This file should be used very carefully. For normal users, it’s recommended to generate an unique credential, to which you whitelist privileges. You can do this with the `kubeadm alpha phase kubeconfig user --client-name <client-name>` command. This command will print out a KubeConfig file to STDOUT which you should save to a file and distribute to your user. After that, whitelist privileges by using `kubectl create (cluster)rolebinding`.
+* The `admin.conf` file ( `/etc/kubernetes/admin.conf` on master node, copied as `/home/student/.kube/config`) gives the user superuser privileges over the cluster. This file should be used very carefully. For normal users, it’s recommended to generate an unique credential, to which you whitelist privileges. You can do this with the `kubeadm alpha phase kubeconfig user --client-name <client-name>` command. This command will print out a KubeConfig file to STDOUT which you should save to a file and distribute to your user. After that, whitelist privileges by using `kubectl create (cluster)rolebinding`.
 
 
 ### About Azure cli:

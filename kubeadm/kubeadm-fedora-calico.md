@@ -798,9 +798,12 @@ Calico's pods are in the `calico-system` namespace:
 ```
 [root@kubeadm-node1 ~] kubectl get pods -n calico-system 
 NAME                                      READY   STATUS    RESTARTS   AGE
-calico-kube-controllers-b87bd7f6f-k2hdv   1/1     Running   0          72s
-calico-node-lxrkq                         1/1     Running   0          73s
-calico-typha-588c975bc5-wkfcw             1/1     Running   0          73s
+NAME                                       READY   STATUS    RESTARTS   AGE
+calico-kube-controllers-5c79f674b6-db8vm   1/1     Running   0          84s
+calico-node-lcndf                          1/1     Running   0          84s
+calico-node-pvxt7                          1/1     Running   0          84s
+calico-typha-f645dd4bc-b8cjk               1/1     Running   0          76s
+calico-typha-f645dd4bc-zbbdj               1/1     Running   0          85s
 [root@kubeadm-node1 ~]# 
 ```
 
@@ -1095,6 +1098,22 @@ tigera-operator   replicaset.apps/tigera-operator-657cc89589          1         
 [root@kubeadm-node1 ~]# 
 ```
 
+## Verify that DNS works:
+**Note:** It may take several minutes before the DNS starts working properly.
+
+```
+[kamran@kworkhorse ~]$ kubectl exec -it multitool bash
+
+bash-5.1# dig +short nginx.default.svc.cluster.local
+10.32.50.176
+
+bash-5.1# dig +short kubernetes.default.svc.cluster.local
+10.32.0.1
+bash-5.1# 
+
+bash-5.1# dig +short google.com
+142.250.74.78
+```
 
 
 

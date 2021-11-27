@@ -1364,6 +1364,84 @@ kubeadm-node2.example.com   Ready    <none>                 20m   v1.21.6   10.2
 Repeat above procedure to join more worker nodes.
 
 
+### How to join a node, if I don't have the join instructions from `kubeadm init`?
+
+On master node, generate a discovery token:
+
+```
+kubeadm token create
+```
+
+Note this token. Then, find the SHA256 hash of the CA certificate. The kubeadm documentation says:
+
+> The hash is calculated over the bytes of the Subject Public Key Info (SPKI) object (as in RFC7469). This value is available in the output of “kubeadm init” or can be calculated using standard tools.
+
+However what exactly are these **"standard tools"** is vague, and not defined anywhere. Searching the internet revealed the following commands. Reference: [https://blog.scottlowe.org/2019/07/12/calculating-ca-certificate-hash-for-kubeadm/](https://blog.scottlowe.org/2019/07/12/calculating-ca-certificate-hash-for-kubeadm/)
+
+
+```
+openssl x509 -in /etc/kubernetes/pki/ca.crt -pubkey -noout |
+  openssl pkey -pubin -outform DER |
+  openssl dgst -sha256 
+```
+
+Using these two pieces of information, you can join a new node as follows:
+
+```
+kubeadm join \
+  10.1.1.81:6443 \
+  --discovery-token ih36na.14kgpeo9ar6gcj4t \
+  --discovery-token-ca-cert-hash sha256:087f647741fcc401264ea708ae17c75a8274fb2c557e8a46c8ba41c46c7db830
+```
+
+```
+[root@k8s-worker1 ~]# kubeadm join --discovery-token ih36na.14kgpeo9ar6gcj4t 10.1.1.81:6443 --discovery-token-ca-cert-hash sha256:bac28461b76d5f82fc15a8d340f6b458076b73f21d77f5acf5707e8cfa0a1d76
+[preflight] Running pre-flight checks
+error execution phase preflight: couldn't validate the identity of the API Server: cluster CA found in cluster-info ConfigMap is invalid: none of the public keys "sha256:087f647741fcc401264ea708ae17c75a8274fb2c557e8a46c8ba41c46c7db830" are pinned
+To see the stack trace of this error execute with --v=5 or higher
+[root@k8s-worker1 ~]# kubeadm join --discovery-token ih36na.14kgpeo9ar6gcj4t 10.1.1.81:6443 --discovery-token-ca-cert-hash sha256:b8f75bf2196c87135c9734a17e8fdb1d2909e6e9dab3d6ed6f74497e2786a0f6
+[preflight] Running pre-flight checks
+error execution phase preflight: couldn't validate the identity of the API Server: cluster CA found in cluster-info ConfigMap is invalid: none of the public keys "sha256:087f647741fcc401264ea708ae17c75a8274fb2c557e8a46c8ba41c46c7db830" are pinned
+To see the stack trace of this error execute with --v=5 or higher
+[root@k8s-worker1 ~]# kubeadm join --discovery-token ih36na.14kgpeo9ar6gcj4t 10.1.1.81:6443 --discovery-token-ca-cert-hash sha256:087f647741fcc401264ea708ae17c75a8274fb2c557e8a46c8ba41c46c7db830
+[preflight] Running pre-flight checks
+[preflight] Reading configuration from the cluster...
+[preflight] FYI: You can look at this config file with 'kubectl -n kube-system get cm kubeadm-config -o yaml'
+[kubelet-start] Writing kubelet configuration to file "/var/lib/kubelet/config.yaml"
+[kubelet-start] Writing kubelet environment file with flags to file "/var/lib/kubelet/kubeadm-flags.env"
+[kubelet-start] Starting the kubelet
+[kubelet-start] Waiting for the kubelet to perform the TLS Bootstrap...
+
+This node has joined the cluster:
+* Certificate signing request was sent to apiserver and a response was received.
+* The Kubelet was informed of the new secure connection details.
+
+Run 'kubectl get nodes' on the control-plane to see this node join the cluster.
+
+[root@k8s-worker1 ~]# 
+```
+
+
+Result, after joining two worker nodes:
+```
+[azhar@k8s-master ~]$ kubectl get nodes
+NAME          STATUS   ROLES                  AGE     VERSION
+k8s-master    Ready    control-plane,master   4d17h   v1.22.4
+k8s-worker1   Ready    <none>                 17m     v1.22.4
+k8s-worker2   Ready    <none>                 54s     v1.22.4
+[azhar@k8s-master ~]$ 
+```
+
+
+
+**Warning:** Just doing a `sha256sum` on the k8s CA certificate (shown below) **will not work**.
+
+```
+[root@k8s-master pki]# sha256sum ca.crt 
+b8f75bf2196c87135c9734a17e8fdb1d2909e6e9dab3d6ed6f74497e2786a0f6  ca.cr
+```
+
+
 ### What if the newly joined node is still "NotReady":
 
 The problem is that flannel will be expecting dependent network plugins in `/opt/cni/bin` on each node. If it does not find it then kubelet is unable to start flannel on the new node. So on Fedora 33+, repeat the copy operation.
